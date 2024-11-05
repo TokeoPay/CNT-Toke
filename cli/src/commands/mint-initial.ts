@@ -42,7 +42,6 @@ export default class MintInitial extends BaseCommand {
     const result = applyParamsToScript(compiledCode, [mOutputReference(txHash, Number.parseInt(index, 10))])
 
     const script = {
-      // eslint-disable-next-line import/no-named-as-default-member
       code: result,
       version: "V3",
     } satisfies PlutusScript;

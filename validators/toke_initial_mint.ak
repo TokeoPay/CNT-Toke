@@ -26,8 +26,6 @@ validator toke_control_token_contract(utxo_ref: OutputReference) {
   }
 }
 
-
-
 test can_we_mint_a_single_token() {
   let mintOutput =
     Output {
@@ -82,7 +80,10 @@ test can_we_mint_a_single_token() {
     }
 
   toke_control_token_contract.mint(
-    OutputReference(#"0000000000000000000000000000000000000000000000000000000000000001", 0),
+    OutputReference(
+      #"0000000000000000000000000000000000000000000000000000000000000001",
+      0,
+    ),
     #[],
     #"00000000000000000000000000000000000000000000000000000000",
     txn,

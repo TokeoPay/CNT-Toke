@@ -1,19 +1,15 @@
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
+use aiken/interval.{empty}
 use cardano/address.{from_verification_key}
 use cardano/assets.{AssetName, PolicyId, from_asset, quantity_of}
 use cardano/script_context.{ScriptContext}
-use cardano/transaction.{InlineDatum, NoDatum, Output, Input, OutputReference, Transaction}
-
-use aiken/interval.{empty}
+use cardano/transaction.{
+  InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
+}
 use tx_util/builder.{
-    build_txn_context,
-    mint_assets,
-    add_tx_input,
-    add_tx_output,
-    add_signatory,
-    new_tx_output,
-    add_asset_to_tx_output
+  add_asset_to_tx_output, add_signatory, add_tx_input, add_tx_output,
+  build_txn_context, mint_assets, new_tx_output,
 }
 
 pub type MintAction {
@@ -38,15 +34,15 @@ pub type MintAction {
   // Control UTxO  
   // 
   Migrate
-
-  // BridgeOnRamp
-  // // Who knows - BTC -> Cardano
-  // BridgeOffRamp
-  // // Who knows - Cardano -> BTC
-  // BridgedBurn
-  // // BTC has burnt some tokens
-  // BridgeMint
 }
+
+// BridgeOnRamp
+// // Who knows - BTC -> Cardano
+// BridgeOffRamp
+// // Who knows - Cardano -> BTC
+// BridgedBurn
+// // BTC has burnt some tokens
+// BridgeMint
 
 // BTC has Minted some tokens
 
@@ -69,12 +65,10 @@ validator toke_contract(
   toke_control_policy: PolicyId,
   toke_control_asset_name: AssetName,
 ) {
-  // mint() {}
-
   spend(
     optional_datum: Option<TokeDatum>,
     redeemer: MintAction,
-    _own_ref: OutputReference,
+    own_ref: OutputReference,
     self: Transaction,
   ) {
     let Transaction { extra_signatories, mint, outputs, .. } = self
@@ -84,17 +78,10 @@ validator toke_contract(
     let is_signed_by_treasuray = list.has(extra_signatories, treasury)
     when redeemer is {
       Minting -> {
-        trace @"Minting"
-        trace @"is_signed_by_treasuray": is_signed_by_treasuray
         // Ensure we have signed
         expect is_signed_by_treasuray
-        // Ensure we are not minting more than allowed
         let updatexTotalMinted =
           quantity_of(mint, toke_policy, toke_asset_name) + datum.xChainTotalMinted
-
-        trace @"updatexTotalMinted": updatexTotalMinted
-        trace @"updatexTotalMinted": datum.xChainTotalSupply
-
         expect updatexTotalMinted <= datum.xChainTotalSupply
 
         // Ensure we are updating the Datum
@@ -110,7 +97,15 @@ validator toke_contract(
             },
           )
 
-        trace @"control_output": control_output
+        expect Some(tx_input) =
+          list.find(
+            self.inputs,
+            fn(input) { input.output_reference == own_ref },
+          )
+
+        // input.output_reference.transaction_id == own_ref.transaction_id &&
+        // input.output_reference.output_index == own_ref.output_index
+        expect control_output.address == tx_input.output.address
 
         let updated_datum =
           TokeDatum { ..datum, xChainTotalMinted: updatexTotalMinted }
@@ -118,8 +113,6 @@ validator toke_contract(
         when control_output.datum is {
           InlineDatum(output_datum) ->
             if output_datum is TokeDatum {
-              trace @"output_datum is TokeDatum": output_datum
-              trace @"output_datum is TokeDatum": updated_datum
               output_datum == updated_datum
             } else {
               trace @"output_datum is not TokeDatum": output_datum
@@ -132,7 +125,57 @@ validator toke_contract(
         }
       }
 
-      Burning -> False
+      Burning -> {
+        let burntToken = quantity_of(mint, toke_policy, toke_asset_name)
+
+        if burntToken >= 0 {
+          False
+        } else {
+          let updated_datum =
+            TokeDatum {
+              ..datum,
+              xChainTotalMinted: datum.xChainTotalMinted - burntToken,
+            }
+          //TODO: Reduct total supplies too!
+          expect Some(control_output) =
+            list.find(
+              outputs,
+              fn(output) {
+                quantity_of(
+                  output.value,
+                  toke_control_policy,
+                  toke_control_asset_name,
+                ) == 1
+              },
+            )
+
+          expect Some(tx_input) =
+            list.find(
+              self.inputs,
+              fn(input) { input.output_reference == own_ref },
+            )
+
+          // input.output_reference.transaction_id == own_ref.transaction_id &&
+          // input.output_reference.output_index == own_ref.output_index
+          expect control_output.address == tx_input.output.address
+
+          when control_output.datum is {
+            InlineDatum(output_datum) ->
+              if output_datum is TokeDatum {
+                trace @"output_datum is TokeDatum": output_datum
+                trace @"output_datum is TokeDatum": updated_datum
+                output_datum == updated_datum
+              } else {
+                trace @"output_datum is not TokeDatum": output_datum
+                False
+              }
+            _ -> {
+              trace @"output_datum is not InlineDatum?"
+              False
+            }
+          }
+        }
+      }
 
       // No need to check if output is consumed for burning
       Migrate ->
@@ -140,13 +183,12 @@ validator toke_contract(
           datum.liquidityProviders,
           fn(sign) { list.has(extra_signatories, sign) },
         )
-
-      // BridgeOffRamp -> False
-      // BridgeOnRamp -> False
-
-      // BridgeMint -> is_signed_by_treasuray
-      // BridgedBurn -> is_signed_by_treasuray
     }
+    // BridgeOffRamp -> False
+    // BridgeOnRamp -> False
+
+    // BridgeMint -> is_signed_by_treasuray
+    // BridgedBurn -> is_signed_by_treasuray
   }
 
   else(_ctx: ScriptContext) {
@@ -154,73 +196,73 @@ validator toke_contract(
   }
 }
 
-const test_toke_policy = #"00000000000000000000000000000000000000000000000000000000"
-const test_toke_control_policy = #"00000000000000000000000000000000000000000000000000000001"
-const test_treasury_pkh = #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5"
+const test_toke_policy =
+  #"00000000000000000000000000000000000000000000000000000000"
+
+const test_toke_control_policy =
+  #"00000000000000000000000000000000000000000000000000000001"
+
+const test_treasury_pkh =
+  #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5"
 
 test test_toke_contract_mint() {
-
   // let toke_output = from_asset(
   //       test_toke_policy,
   //       "$Toke",
   //       10,
   //     )
 
-  let toke_control_output = from_asset(
-        test_toke_control_policy,
-        "$TokeControl",
-        1,
-      )
+  let toke_control_output =
+    from_asset(test_toke_control_policy, "$TokeControl", 1)
 
-  let datum = TokeDatum {
-        totalCardanoSupply: 100,
-        xChainTotalSupply: 100,
-        // Reduced only by a Burn
-        xChainTotalMinted: 0,
-        liquidityProviders: [],
-      }
-let datum_after = TokeDatum {
-        totalCardanoSupply: 100,
-        xChainTotalSupply: 100,
-        // Reduced only by a Burn
-        xChainTotalMinted: 10,
-        liquidityProviders: [],
-      }
-  
-  let tx_out = new_tx_output(
-    from_verification_key(
-      #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
-    ),
-    1_500_000,
-    InlineDatum(datum_after)
-  ) |> add_asset_to_tx_output(toke_control_output)
+  let datum =
+    TokeDatum {
+      totalCardanoSupply: 100,
+      xChainTotalSupply: 100,
+      // Reduced only by a Burn
+      xChainTotalMinted: 0,
+      liquidityProviders: [],
+    }
+  let datum_after =
+    TokeDatum {
+      totalCardanoSupply: 100,
+      xChainTotalSupply: 100,
+      // Reduced only by a Burn
+      xChainTotalMinted: 10,
+      liquidityProviders: [],
+    }
+  let tx_out =
+    new_tx_output(
+      from_verification_key(
+        #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
+      ),
+      1_500_000,
+      InlineDatum(datum_after),
+    )
+      |> add_asset_to_tx_output(toke_control_output)
 
-  let tx_out_control = new_tx_output(
-    from_verification_key(
-      #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
-    ),
-    1_500_000,
-    NoDatum
-  ) |> add_asset_to_tx_output(toke_control_output)
+  let tx_out_control =
+    new_tx_output(
+      from_verification_key(
+        #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
+      ),
+      1_500_000,
+      NoDatum,
+    )
+      |> add_asset_to_tx_output(toke_control_output)
 
-  
   let a_utxo = OutputReference { transaction_id: "", output_index: 0 }
 
-  let txn = empty 
-    |> build_txn_context()
-    |> mint_assets(test_toke_policy, from_asset(
-        test_toke_policy,
-        "$Toke",
-        10,
-      ))
-    |> add_tx_output(tx_out)
-    |> add_tx_input( Input { output_reference: a_utxo, output: tx_out_control })
-    |> add_signatory(test_treasury_pkh)
-
+  let txn =
+    empty
+      |> build_txn_context()
+      |> mint_assets(test_toke_policy, from_asset(test_toke_policy, "$Toke", 10))
+      |> add_tx_output(tx_out)
+      |> add_tx_input(Input { output_reference: a_utxo, output: tx_out_control })
+      |> add_signatory(test_treasury_pkh)
 
   let redeemer = Minting
 
-  
   toke_contract.spend(
     test_treasury_pkh,
     test_toke_policy,
