@@ -1,0 +1,23 @@
+name = "tokeo/toke"
+version = "0.0.0"
+compiler = "v1.1.5"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Aiken contracts for project 'tokeo/toke'"
+
+[repository]
+user = "tokeo"
+project = "toke"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2"
+source = "github"
+
+[[dependencies]]
+name = "aiken-extra/tx_util"
+version = "1.210.202409"
+source = "github"
+
+[config]
