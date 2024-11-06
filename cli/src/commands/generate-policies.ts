@@ -4,17 +4,16 @@ import {readFile} from 'node:fs/promises'
 
 import {BaseCommand} from '../utils/base-command.js'
 import {calcTokePolicy} from '../utils/calc-mint-policy.js'
+import {TOKE_TOKEN_NAME} from '../utils/toke-constants.js'
 
 export default class GeneratePolicies extends BaseCommand {
-  static override args = {    
+  static override args = {
     txOutRef: Args.string({description: 'UTxO Reference to base the initial mint upon', required: true}),
   }
 
   static override description = 'describe the command here'
 
-  static override examples = [
-    '<%= config.bin %> <%= command.id %>',
-  ]
+  static override examples = ['<%= config.bin %> <%= command.id %>']
 
   static override flags = {
     bfApiKey: Flags.string({char: 'b', description: 'Blockfrost API Key', required: true}),
@@ -26,7 +25,7 @@ export default class GeneratePolicies extends BaseCommand {
     const {args, flags} = await this.parse(GeneratePolicies)
 
     const networkId = flags.cardanoNetwork === 'mainnet' ? 1 : 0
-    
+
     const blueprint = JSON.parse((await readFile(flags.file)).toString('utf8'))
     const validator = blueprint.validators.find(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,8 +51,7 @@ export default class GeneratePolicies extends BaseCommand {
       With UTxO: ${txHash}.${index}.
       Authority Token Policy: ${controlTokenHash}
       TOKE Token Policy: ${tokePolicy}
+      TOKE Token Name: ${TOKE_TOKEN_NAME} (${Buffer.from(TOKE_TOKEN_NAME).toString('hex')})
       `)
-
-
   }
 }

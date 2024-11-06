@@ -8,7 +8,6 @@ import {
   deserializeAddress,
   integer,
   list,
-  mConStr0,
   mOutputReference,
   pubKeyHash,
   resolvePlutusScriptAddress,
@@ -136,11 +135,11 @@ export default class MintInitial extends BaseCommand {
       .selectUtxosFrom(utxos)
       .complete()
 
-    // const signedTx = wallet.signTx(txn, true)
+    const signedTx = wallet.signTx(txn, true)
 
     // this.log('\n\n')
     this.log(txn)
-    // this.log('\n\n')
+    this.log('\n\n')
     // this.log(signedTx)
     // this.log('\n\n')
     // this.log(
@@ -149,13 +148,13 @@ export default class MintInitial extends BaseCommand {
     //   ).toString('hex')}`,
     // )
 
-    // try {
-    //   const txHashResult = await wallet.submitTx(signedTx)
+    try {
+      const txHashResult = await wallet.submitTx(signedTx)
 
-    //   this.log('\n\n')
-    //   this.log(`Submitted: ${txHashResult}`)
-    // } catch (error) {
-    //   this.error(error as Error)
-    // }
+      this.log('\n\n')
+      this.log(`Submitted: ${txHashResult}`)
+    } catch (error) {
+      this.error(error as Error)
+    }
   }
 }
