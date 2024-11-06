@@ -1,5 +1,6 @@
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
+use aiken/cbor
 use aiken/interval.{empty}
 use cardano/address.{from_verification_key}
 use cardano/assets.{AssetName, PolicyId, from_asset, quantity_of}
@@ -205,13 +206,7 @@ const test_toke_control_policy =
 const test_treasury_pkh =
   #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5"
 
-test test_toke_contract_mint() {
-  // let toke_output = from_asset(
-  //       test_toke_policy,
-  //       "$Toke",
-  //       10,
-  //     )
-
+test test_toke_control_mint() {
   let toke_control_output =
     from_asset(test_toke_control_policy, "$TokeControl", 1)
 
@@ -223,6 +218,9 @@ test test_toke_contract_mint() {
       xChainTotalMinted: 0,
       liquidityProviders: [],
     }
+
+  trace @"datum": cbor.serialise(datum)
+
   let datum_after =
     TokeDatum {
       totalCardanoSupply: 100,

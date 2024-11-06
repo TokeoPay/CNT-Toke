@@ -21,9 +21,9 @@ it as layed out below:
 The UTxO holding the TOKE Authority Token (from now on known as the Authority UTxO) will have Inline
 Datum initialized as such:
 
-Max Supply: 100,000,000
+Max Supply: 95,000,000
 Total Minted: 0
-Liquidity Providers: List of PKH
+Migration Authority: List of PKH
 
 ### Mint
 
@@ -43,8 +43,8 @@ Liquidity Providers: List of PKH
 
 ### Migrate
 
-The Liquidity Providers all must sign the transaction to allow the TOKE Authority UTxO to be migrated to a new
-contract. It is imperative that the Liquidity Providers take seriously the process that is being undertaken
+The Migration Authority all must sign the transaction to allow the TOKE Authority UTxO to be migrated to a new
+contract. It is imperative that the Migration Authority take seriously the process that is being undertaken
 here and make sure that the resulting Transaction will maintain the integrity of the TOKE Token.
 
 ## TOKE Mint Contract
