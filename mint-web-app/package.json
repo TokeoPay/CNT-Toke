@@ -1,0 +1,28 @@
+{
+    "name": "mint-web-app",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@lucid-evolution/lucid": "^0.4.2",
+        "@meshsdk/core": "^1.7.13",
+        "@meshsdk/core-csl": "1.7.13",
+        "@meshsdk/react": "^1.7.13",
+        "next": "14",
+        "react": "18",
+        "react-dom": "18"
+    },
+    "devDependencies": {
+        "@types/node": "^22",
+        "@types/react": "^18",
+        "@types/react-dom": "^18",
+        "postcss": "^8",
+        "tailwindcss": "^3.4.1",
+        "typescript": "^5"
+    }
+}

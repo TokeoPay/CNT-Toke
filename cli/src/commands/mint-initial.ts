@@ -7,9 +7,7 @@ import {
   conStr0,
   deserializeAddress,
   integer,
-  list,
   mOutputReference,
-  pubKeyHash,
   resolvePlutusScriptAddress,
   resolvePlutusScriptHash,
 } from '@meshsdk/core'
@@ -65,36 +63,46 @@ export default class MintInitial extends BaseCommand {
     const controlTokenHash = resolvePlutusScriptHash(resolvePlutusScriptAddress(script, networkId))
 
     const mgmtAddr = deserializeAddress(
-      'addr1qxlk4expdpk5eg40xen5rr3h7vcxf47v8ecj6nnlwrrymzhpmvvw5j5mhlus644494mwgr2qvejrja92dymkhvnrpn4qjchtv4',
+      flags.cardanoNetwork === 'mainnet'
+        ? 'addr1qxlk4expdpk5eg40xen5rr3h7vcxf47v8ecj6nnlwrrymzhpmvvw5j5mhlus644494mwgr2qvejrja92dymkhvnrpn4qjchtv4'
+        : 'addr_test1qrgqd6mhs05vjvtqk2at9pau3fhsd857dyxds27qk54gcvtnpkq9k63v7eue3u8u6pcvuzmwsk2hl46ceu9wxjxjvh4sj4drgd',
     )
 
     const managementPKH = mgmtAddr.pubKeyHash
 
     const {hash: tokePolicy} = await calcTokePolicy(flags.file, controlTokenHash, networkId)
 
-    this.logJson([
+    const details = {
       managementPKH,
-      // Control Token - Thread Token
-      controlTokenHash,
-      Buffer.from('$toke_ctrl').toString('hex'),
       // TOKE
       tokePolicy,
-      Buffer.from('TOKE').toString('hex'),
-    ])
+      tokeAsset: Buffer.from('TOKE').toString('hex'),
+      // Control Token - Thread Token
+      controlTokenHash,
+      ctrlAsset: Buffer.from('$toke_ctrl').toString('hex'),
+    }
+
+    this.logJson({
+      mgmtPkh: details.managementPKH,
+      ctrlPolicy: details.controlTokenHash,
+      ctrlAsset: details.ctrlAsset,
+      tokePolicy: details.tokePolicy,
+      tokeAsset: details.tokeAsset,
+    })
 
     const controlScriptString = applyParamsToScript(controlValidator.compiledCode, [
-      managementPKH,
-      // Control Token - Thread Token
-      controlTokenHash,
-      Buffer.from('$toke_ctrl').toString('hex'),
+      details.managementPKH,
       // TOKE
-      tokePolicy,
-      'TOKE',
+      details.tokePolicy,
+      details.tokeAsset,
+      // Control Token - Thread Token
+      details.controlTokenHash,
+      details.ctrlAsset,
     ])
 
     const controlScript = {
       code: controlScriptString,
-      version: 'V2',
+      version: 'V3',
     } satisfies PlutusScript
 
     const controlAddress = resolvePlutusScriptAddress(controlScript, networkId)
@@ -114,13 +122,13 @@ export default class MintInitial extends BaseCommand {
       fields: [],
     }
 
-    const datum = conStr0([integer(95_000_000), integer(95_000_000), integer(0), list([pubKeyHash(managementPKH)])])
+    const datum = conStr0([integer(95_000_000), integer(0)])
 
     const txn = await new MeshTxBuilder({
       fetcher: bf,
       submitter: bf,
       evaluator: bf,
-      verbose: true,
+      verbose: false,
     })
       .setNetwork(flags.cardanoNetwork as Network)
       .txIn(mintUtxo.input.txHash, mintUtxo.input.outputIndex, mintUtxo.output.amount)
@@ -138,8 +146,8 @@ export default class MintInitial extends BaseCommand {
     const signedTx = wallet.signTx(txn, true)
 
     // this.log('\n\n')
-    this.log(txn)
-    this.log('\n\n')
+    // this.log(txn)
+    // this.log('\n\n')
     // this.log(signedTx)
     // this.log('\n\n')
     // this.log(

@@ -58,11 +58,9 @@ test test_toke_mint() {
     from_asset(test_toke_control_policy, "$TokeControl", 1)
   let datum_after =
     TokeDatum {
-      totalCardanoSupply: 100,
-      xChainTotalSupply: 100,
+      totalSupply: 100,
       // Reduced only by a Burn
-      xChainTotalMinted: 10,
-      liquidityProviders: [],
+      totalMinted: 10,
     }
   let tx_out =
     new_tx_output(

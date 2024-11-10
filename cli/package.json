@@ -8,6 +8,7 @@
   },
   "bugs": "https://github.com/toke/toke-cli/issues",
   "dependencies": {
+    "@cardano-ogmios/client": "^6.9.0",
     "@meshsdk/core": "^1.7.12",
     "@oclif/core": "^4",
     "@oclif/plugin-help": "^6",

@@ -1,0 +1,22 @@
+export BF_API="preprodlo9w8OJZZufLEw5UQVQppXtlDt1vVtBM"
+
+./bin/dev.js generate-policies -p ../plutus.json \
+  7833fa2e9e88ff86a3c846236d5b304b3e2bf032a340e9ebade8067d47889ffd.1 \
+   -n ../.private/creds -c preprod -b $BF_API
+
+
+./bin/dev.js mint-initial a2a17ac595efa7f4e3e40551df759963aef247588064a82a105b2afe007a0d62.1 \
+  -p ../plutus.json \
+  -b $BF_API \
+  -c preprod \
+  -n ../.private/creds
+
+
+cat debug/tx.cbor | ./bin/dev.js evaluate_txn -a ogmios1g8n0lngspjy6kfvehx4 -u https://preprod-v5.ogmios-m1.demeter.run
+
+ff174b21f70ac8180addcc328bc19cf1e21f11bf5b57fe08ca90290479bd0d21.0
+
+7833fa2e9e88ff86a3c846236d5b304b3e2bf032a340e9ebade8067d47889ffd.1
+
+
+./bin/dev.js send-ada -n ../.private/testing.main.creds -c mainnet -b $BF_API

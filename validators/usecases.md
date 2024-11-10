@@ -41,12 +41,6 @@ Migration Authority: List of PKH
 4. We must create a new Authority UTxO containing the correctly updated Datum - calculated from point 3 above.
 5. The new Authority UTxO must remain on contract.
 
-### Migrate
-
-The Migration Authority all must sign the transaction to allow the TOKE Authority UTxO to be migrated to a new
-contract. It is imperative that the Migration Authority take seriously the process that is being undertaken
-here and make sure that the resulting Transaction will maintain the integrity of the TOKE Token.
-
 ## TOKE Mint Contract
 
 This is probably the most straight forward contract that we have. This contract just needs to ensure that the Authority UTxO (held on the TOKE Authority Contract above) has been allowed to be spent. We delegate all responsibility to the Authority Contract for managing the Mint of TOKE.
