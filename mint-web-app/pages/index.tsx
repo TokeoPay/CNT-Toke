@@ -1,8 +1,9 @@
 import localFont from "next/font/local";
 import { CardanoWallet, useWallet } from "@meshsdk/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   applyParamsToScript,
+  AssetExtended,
   BlockfrostProvider,
   deserializeDatum,
   Network,
@@ -20,6 +21,7 @@ import {
 } from "@lucid-evolution/lucid";
 
 import plutus from "../../plutus.json";
+import { details } from "../lib/constants";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
@@ -84,17 +86,17 @@ export default function Home() {
         //   "controlTokenHash": "832d689d66e83c902048173fc4dcd29e6bc2d0cce9e5eca12edc87d5",
         //   "ctrlAsset": "24746f6b655f6374726c"
         // }
-        const details = {
-          managementAddress:
-            "addr_test1qrgqd6mhs05vjvtqk2at9pau3fhsd857dyxds27qk54gcvtnpkq9k63v7eue3u8u6pcvuzmwsk2hl46ceu9wxjxjvh4sj4drgd",
-          mgmtPkh: "d006eb7783e8c93160b2bab287bc8a6f069e9e690cd82bc0b52a8c31",
-          ctrlPolicy:
-            "8906a58aa4a01745ef7985e3f03f4a1baf5ce3ea43c2a55986ff629e",
-          ctrlAsset: "24746f6b655f6374726c",
-          tokePolicy:
-            "dcd091f659bb7e785353ed9543c23b773217c7c3b703d329ba5c7f67",
-          tokeAsset: "544f4b45",
-        };
+        // const details = {
+        //   managementAddress:
+        //     "addr_test1qrgqd6mhs05vjvtqk2at9pau3fhsd857dyxds27qk54gcvtnpkq9k63v7eue3u8u6pcvuzmwsk2hl46ceu9wxjxjvh4sj4drgd",
+        //   mgmtPkh: "d006eb7783e8c93160b2bab287bc8a6f069e9e690cd82bc0b52a8c31",
+        //   ctrlPolicy:
+        //     "8906a58aa4a01745ef7985e3f03f4a1baf5ce3ea43c2a55986ff629e",
+        //   ctrlAsset: "24746f6b655f6374726c",
+        //   tokePolicy:
+        //     "dcd091f659bb7e785353ed9543c23b773217c7c3b703d329ba5c7f67",
+        //   tokeAsset: "544f4b45",
+        // };
 
         const mintScriptString = applyParamsToScript(
           mintValidator.compiledCode,
@@ -166,7 +168,7 @@ export default function Home() {
 
         datum.fields[1].int = datum.fields[1].int + tokensToMint;
 
-        if (datum.fields[0].int < 0) {
+        if (datum.fields[1].int < 0) {
           throw new Error("Trying to mint oo many tokens");
         }
 
