@@ -9,11 +9,11 @@
   "bugs": "https://github.com/toke/toke-cli/issues",
   "dependencies": {
     "@cardano-ogmios/client": "^6.9.0",
-    "@meshsdk/core": "^1.7.12",
+    "@meshsdk/core": "^1.7.19",
     "@oclif/core": "^4",
     "@oclif/plugin-help": "^6",
     "@oclif/plugin-plugins": "^5",
-    "cbor": "^10.0.2"
+    "cbor": "^10.0.3"
   },
   "devDependencies": {
     "@oclif/prettier-config": "^0.2.1",

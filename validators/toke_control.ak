@@ -550,3 +550,97 @@ test test_toke_burn() {
     txn.transaction,
   )
 }
+
+
+test test_toke_burn_as_mint() fail {
+
+  let toke_control_output =
+    from_asset(test_toke_control_policy, "$TokeControl", 1)
+
+  let test_token_count = 100
+  let test_token_burn = -10
+
+  let toke_mint_output = from_asset(test_toke_policy, "TOKE", test_token_burn)
+
+  let datum =
+    TokeDatum {
+      totalSupply: test_token_count,
+      // Reduced only by a Burn
+      totalMinted: test_token_count,
+    }
+
+  trace @"datum": cbor.serialise(datum)
+
+  let datum_after =
+    TokeDatum {
+      totalSupply: 90,
+      // Reduced only by a Burn
+      totalMinted: 90,
+    }
+
+  trace @"datum_after": cbor.serialise(datum_after)
+  
+  let tx_in_control =
+    new_tx_output(
+      from_verification_key(
+        #"7050e2c54966672fc797a03cfbe14a7eba4305a70855a9ef57ef93de9b",
+      ),
+      1_500_000,
+      InlineDatum(datum),
+    )
+      |> add_asset_to_tx_output(toke_control_output)
+  
+  let tx_out_control =
+    new_tx_output(
+      from_verification_key(
+        #"7050e2c54966672fc797a03cfbe14a7eba4305a70855a9ef57ef93de9b",
+      ),
+      1_500_000,
+      InlineDatum(datum_after),
+    )
+      |> add_asset_to_tx_output(toke_control_output)
+
+
+
+  
+  let tx_out_mint =
+    new_tx_output(
+      from_verification_key(
+        #"d006eb7783e8c93160b2bab287bc8a6f069e9e690cd82bc0b52a8c31",
+      ),
+      1_500_000,
+      NoDatum,
+    )
+      |> add_asset_to_tx_output(toke_mint_output)
+
+  let a_utxo = OutputReference { transaction_id: "", output_index: 0 }
+
+  let txn =
+    empty
+      |> build_txn_context()
+      |> mint_assets(
+          test_toke_policy,
+          from_asset(test_toke_policy, "$Toke", 13),
+        )
+      |> add_tx_output(tx_out_mint)
+      |> add_tx_output(tx_out_control)
+      |> add_tx_input(Input { output_reference: a_utxo, output: tx_in_control })
+      |> add_signatory(test_treasury_pkh)
+
+  let redeemer = Burning
+
+  trace @"txn": cbor.serialise(txn)
+  trace @"redeemer": cbor.serialise(redeemer)
+
+  toke_contract.spend(
+    test_treasury_pkh,
+    test_toke_policy,
+    "$Toke",
+    test_toke_control_policy,
+    "$TokeControl",
+    Some(datum),
+    redeemer,
+    a_utxo,
+    txn.transaction,
+  )
+}

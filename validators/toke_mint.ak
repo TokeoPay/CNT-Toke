@@ -99,4 +99,56 @@ test test_toke_mint() {
     txn.transaction,
   )
 }
+
+test test_must_spend_control_token() fail {
+  // let toke_output = from_asset(
+  //       test_toke_policy,
+  //       "$Toke",
+  //       10,
+  //     )
+  let toke_control_output =
+    from_asset(#"00000000000000000000000000000000000000000000000000000002", "$TokeControl", 1)
+  let datum_after =
+    TokeDatum {
+      totalSupply: 100,
+      // Reduced only by a Burn
+      totalMinted: 10,
+    }
+  let tx_out =
+    new_tx_output(
+      from_verification_key(
+        #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
+      ),
+      1_500_000,
+      InlineDatum(datum_after),
+    )
+      |> add_asset_to_tx_output(toke_control_output)
+  let tx_out_control =
+    new_tx_output(
+      from_verification_key(
+        #"87dabce266595fecb7d5c48b423b3a41ad5a3b864c43a35ee001d6d5",
+      ),
+      1_500_000,
+      NoDatum,
+    )
+      |> add_asset_to_tx_output(toke_control_output)
+
+  let a_utxo = OutputReference { transaction_id: "", output_index: 0 }
+
+  let txn =
+    empty
+      |> build_txn_context()
+      |> mint_assets(test_toke_policy, from_asset(test_toke_policy, "$Toke", 10))
+      |> add_tx_output(tx_out)
+      |> add_tx_input(Input { output_reference: a_utxo, output: tx_out_control })
+      |> add_signatory(test_treasury_pkh)
+
+  toke_mint.mint(
+    test_toke_control_policy,
+    "$TokeControl",
+    #[],
+    test_toke_policy,
+    txn.transaction,
+  )
+}
 /// Helpful: https://github.com/ariady-putra/tx_util/blob/main/validators/test_builder_txn.ak

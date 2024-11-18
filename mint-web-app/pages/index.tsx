@@ -20,8 +20,10 @@ import {
   Constr,
 } from "@lucid-evolution/lucid";
 
+import metadata from "../../TOKE.metadata.json";
 import plutus from "../../plutus.json";
 import { details } from "../lib/constants";
+import { version } from "os";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
@@ -242,6 +244,21 @@ export default function Home() {
           };
           mintMetadata[details.tokePolicy] = { "544f4b45": assetMetaData };
 
+          const cip20Metadata = {
+            [details.tokePolicy]:
+              metadata[20][
+                "375df3f2fb44d3c42b3381a09edd4ea2303a57ada32b5308c0774ee0"
+              ],
+            version: metadata[20].version,
+          };
+          const cip721Metadata = {
+            [details.tokePolicy]:
+              metadata[721][
+                "375df3f2fb44d3c42b3381a09edd4ea2303a57ada32b5308c0774ee0"
+              ],
+            version: metadata[721].version,
+          };
+
           const txn = await lucid
             .newTx()
             .collectFrom(scriptUtxos, redeemer)
@@ -260,7 +277,8 @@ export default function Home() {
               type: "PlutusV3",
               script: mintScriptString,
             })
-            .attachMetadata(20, {})
+            .attachMetadata(20, cip20Metadata)
+            .attachMetadata(721, cip721Metadata)
             .complete({
               changeAddress: walletAddress,
               localUPLCEval: true,
