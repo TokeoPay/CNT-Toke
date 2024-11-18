@@ -1,0 +1,79 @@
+{
+  "20": {
+    "375df3f2fb44d3c42b3381a09edd4ea2303a57ada32b5308c0774ee0": {
+      "544F4B45": {
+        "ticker": "TOKE",
+        "name": "TOKE",
+        "desc": "The official Tokeo Token.",
+        "description": "The official Tokeo Token.",
+        "icon": "ipfs://QmT4GwQx4MSPTy55wkU3eUVJmvsba2H6prPnxB8NEeRwRU",
+        "image": "ipfs://QmT4GwQx4MSPTy55wkU3eUVJmvsba2H6prPnxB8NEeRwRU",
+        "mediaType": "image/png",
+        "decimals": "0",
+        "website": "https://tokeopay.io",
+        "whitepaper": "https://tokeo.gitbook.io/tokeo/tokeo/tokenomics-overview",
+        "token site": "https://tokeo.gitbook.io/tokeo/tokeo/tokenomics-overview",
+        "files": [
+          {
+            "name": "TOKE.webp",
+            "mediaType": "image/webp",
+            "src": "ipfs://QmNopseDH4rx2UgZWCsesKc2NwfZV16LtKEvQmRbHfxrWS"
+          },
+          {
+            "name": "TOKE.png",
+            "mediaType": "image/png",
+            "src": "ipfs://QmT4GwQx4MSPTy55wkU3eUVJmvsba2H6prPnxB8NEeRwRU"
+          },
+          {
+            "name": "TOKE.gif",
+            "mediaType": "image/gif",
+            "src": "ipfs://QmXT7JyTTEgZr1gWKjgMR7YcvDmjQtVeUvCtRigcURMdTH"
+          },
+          {
+            "name": "TOKE.jpg",
+            "mediaType": "image/jpg",
+            "src": "ipfs://QmcXvsL36fKm1syKbLgtBLdYcfnvJBcwN9fYg9Wj5KnfJV"
+          }
+        ]
+      }
+    },
+    "version": "1.0"
+  },
+  "721": {
+    "375df3f2fb44d3c42b3381a09edd4ea2303a57ada32b5308c0774ee0": {
+      "TOKE": {
+        "name": "TOKE",
+        "ticker": "TOKE",
+        "image": "ipfs://QmT4GwQx4MSPTy55wkU3eUVJmvsba2H6prPnxB8NEeRwRU",
+        "mediaType": "image/png",
+        "description": "The official Tokeo Token.",
+        "website": "https://tokeopay.io",
+        "whitepaper": "https://tokeo.gitbook.io/tokeo/tokeo/tokenomics-overview",
+        "token site": "https://tokeo.gitbook.io/tokeo/tokeo/tokenomics-overview",
+        "files": [
+          {
+            "name": "TOKE.webp",
+            "mediaType": "image/webp",
+            "src": "ipfs://QmNopseDH4rx2UgZWCsesKc2NwfZV16LtKEvQmRbHfxrWS"
+          },
+          {
+            "name": "TOKE.png",
+            "mediaType": "image/png",
+            "src": "ipfs://QmT4GwQx4MSPTy55wkU3eUVJmvsba2H6prPnxB8NEeRwRU"
+          },
+          {
+            "name": "TOKE.gif",
+            "mediaType": "image/gif",
+            "src": "ipfs://QmXT7JyTTEgZr1gWKjgMR7YcvDmjQtVeUvCtRigcURMdTH"
+          },
+          {
+            "name": "TOKE.jpg",
+            "mediaType": "image/jpg",
+            "src": "ipfs://QmcXvsL36fKm1syKbLgtBLdYcfnvJBcwN9fYg9Wj5KnfJV"
+          }
+        ]
+      }
+    },
+    "version": "1.0"
+  }
+}
