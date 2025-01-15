@@ -1,4 +1,4 @@
-import { Network } from "@lucid-evolution/lucid";
+import { Kupmios, Network } from "@lucid-evolution/lucid";
 import { CardanoWallet, useWallet } from "@meshsdk/react";
 import { useEffect, useState } from "react";
 
@@ -50,11 +50,12 @@ export default function Burn() {
 
         try {
             setLoading(true);
-            const bf = new Blockfrost(
-                `https://cardano-${network}.blockfrost.io/api/v0`,
-                apiKey
-            );
-            const lucid = await Lucid(bf, network, {});
+            new Kupmios("/kupo-mn", "/ogmios-mn")
+            // const bf = new Blockfrost(
+            //     `https://cardano-${network}.blockfrost.io/api/v0`,
+            //     apiKey
+            // );
+            const lucid = await Lucid(new Kupmios("/kupo-mn", "/ogmios-mn"), network, {});
 
             lucid.selectWallet.fromAPI(
                 wallet._walletInstance as unknown as WalletApi
