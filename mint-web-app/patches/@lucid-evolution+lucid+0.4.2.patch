@@ -1,0 +1,4060 @@
+diff --git a/node_modules/@lucid-evolution/lucid/dist/index.cjs b/node_modules/@lucid-evolution/lucid/dist/index.cjs
+index cd09c68..bbc3570 100644
+--- a/node_modules/@lucid-evolution/lucid/dist/index.cjs
++++ b/node_modules/@lucid-evolution/lucid/dist/index.cjs
+@@ -34,10 +34,12 @@ __export(src_exports, {
+   CML: () => CML,
+   ERROR_MESSAGE: () => ERROR_MESSAGE,
+   Lucid: () => Lucid,
++  NullableError: () => NullableError,
+   RunTimeError: () => RunTimeError,
+   TxBuilderError: () => TxBuilderError,
+   TxSignerError: () => TxSignerError,
+   TxSubmitError: () => TxSubmitError,
++  UnauthorizedNetwork: () => UnauthorizedNetwork,
+   makeReturn: () => makeReturn,
+   makeSubmit: () => makeSubmit,
+   makeTxBuilder: () => makeTxBuilder,
+@@ -84,11 +86,11 @@ var metadataOf = async (provider, unit) => {
+ };
+ 
+ // src/lucid-evolution/LucidEvolution.ts
+-var import_utils14 = require("@lucid-evolution/utils");
++var import_utils13 = require("@lucid-evolution/utils");
+ 
+ // src/tx-builder/internal/Collect.ts
+-var import_effect4 = require("effect");
+-var import_plutus2 = require("@lucid-evolution/plutus");
++var import_effect5 = require("effect");
++var import_plutus3 = require("@lucid-evolution/plutus");
+ var import_utils3 = require("@lucid-evolution/utils");
+ 
+ // src/Errors.ts
+@@ -111,6 +113,12 @@ var ERROR_MESSAGE = {
+   MISSING_SCRIPT: (hash) => `MISSING_SCRIPT: Script not found when building transaction, consider using attach modules. script_hash: ${hash}`,
+   MISSING_POLICY: (policyId) => `MISSING_POLICY: No policy found, policy_id: ${policyId}`
+ };
++var NullableError = class extends import_effect2.Data.TaggedError("NullableError") {
++};
++var UnauthorizedNetwork = class extends import_effect2.Data.TaggedError(
++  "UnauthorizedNetwork"
++) {
++};
+ var TxBuilderError = class extends import_effect2.Data.TaggedError("TxBuilderError") {
+   get message() {
+     return `${this.cause}`;
+@@ -139,6 +147,7 @@ var CML3 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"),
+ var CML2 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+ var import_effect3 = require("effect");
+ var import_utils2 = require("@lucid-evolution/utils");
++var import_plutus2 = require("@lucid-evolution/plutus");
+ var txBuilderError = (cause) => new TxBuilderError({ cause: `{ TxBuilderError : ${cause} }` });
+ var toCMLAddress = (address, lucidConfig) => import_effect3.Effect.gen(function* ($) {
+   const { type } = yield* validateAddressDetails(address, lucidConfig);
+@@ -254,30 +263,45 @@ var validateAndGetStakeCredential = (rewardAddress, config) => import_effect3.Ef
+   );
+   return stakeCredential;
+ });
++var resolveDatum = (datumHash, datum, provider) => import_effect3.Effect.gen(function* () {
++  if (!datumHash || datum) return datum;
++  return yield* (0, import_effect3.pipe)(
++    import_effect3.Effect.tryPromise({
++      try: () => provider.getDatum(datumHash),
++      catch: txBuilderError
++    }),
++    import_effect3.Effect.map(import_plutus2.Data.to)
++  );
++});
+ 
+ // src/tx-builder/internal/Collect.ts
+ var import_utils4 = require("@lucid-evolution/utils");
++
++// src/tx-builder/internal/Service.ts
++var import_effect4 = require("effect");
++var TxConfig = class extends import_effect4.Context.Tag("TxConfig")() {
++};
++
++// src/tx-builder/internal/Collect.ts
+ var collectError = (cause) => new TxBuilderError({ cause: `{ Collect: ${cause} }` });
+-var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => import_effect4.Effect.gen(function* ($) {
+-  if (utxos.length === 0) yield* $(collectError(ERROR_MESSAGE.EMPTY_UTXO));
++var collectFromUTxO = (utxos, collectInputs = true) => (redeemer) => import_effect5.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  if (utxos.length === 0) yield* collectError(ERROR_MESSAGE.EMPTY_UTXO);
+   for (const utxo of utxos) {
+-    if (utxo.datumHash && !utxo.datum) {
+-      const data = yield* $(
+-        import_effect4.Effect.tryPromise({
+-          try: () => datumOf(config.lucidConfig.provider, utxo),
+-          catch: (cause) => collectError({ cause })
+-        })
+-      );
+-      utxo.datum = import_plutus2.Data.to(data);
+-    }
+-    const coreUtxo = (0, import_utils3.utxoToCore)(utxo);
++    const resolvedDatum = yield* resolveDatum(
++      utxo.datumHash,
++      utxo.datum,
++      config.lucidConfig.provider
++    );
+     if (collectInputs) config.collectedInputs.push(utxo);
+-    const input = CML3.SingleInputBuilder.from_transaction_unspent_output(coreUtxo);
++    const input = CML3.SingleInputBuilder.from_transaction_unspent_output(
++      (0, import_utils3.utxoToCore)({ ...utxo, datum: resolvedDatum })
++    );
+     const credential = (0, import_utils4.paymentCredentialOf)(utxo.address);
+     if (credential.type == "Script") {
+-      const script = yield* $(
+-        import_effect4.Effect.fromNullable(config.scripts.get(credential.hash)),
+-        import_effect4.Effect.orElseFail(
++      const script = yield* (0, import_effect5.pipe)(
++        import_effect5.Effect.fromNullable(config.scripts.get(credential.hash)),
++        import_effect5.Effect.orElseFail(
+           () => collectError(
+             collectError(ERROR_MESSAGE.MISSING_SCRIPT(credential.hash))
+           )
+@@ -293,9 +317,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => imp
+           );
+           break;
+         case "PlutusV1": {
+-          const red = yield* $(
+-            import_effect4.Effect.fromNullable(redeemer),
+-            import_effect4.Effect.orElseFail(
++          const red = yield* (0, import_effect5.pipe)(
++            import_effect5.Effect.fromNullable(redeemer),
++            import_effect5.Effect.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -310,9 +334,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => imp
+         }
+         case "PlutusV2": {
+           const v2 = toV2(script.script);
+-          const red = yield* $(
+-            import_effect4.Effect.fromNullable(redeemer),
+-            import_effect4.Effect.orElseFail(
++          const red = yield* (0, import_effect5.pipe)(
++            import_effect5.Effect.fromNullable(redeemer),
++            import_effect5.Effect.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -331,9 +355,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => imp
+         }
+         case "PlutusV3": {
+           const v3 = toV3(script.script);
+-          const red = yield* $(
+-            import_effect4.Effect.fromNullable(redeemer),
+-            import_effect4.Effect.orElseFail(
++          const red = yield* (0, import_effect5.pipe)(
++            import_effect5.Effect.fromNullable(redeemer),
++            import_effect5.Effect.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -356,48 +380,45 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => imp
+     }
+   }
+ });
+-var collectFromUTxOPartial = (config, utxos, redeemerBuilder) => import_effect4.Effect.gen(function* ($) {
++var collectFromUTxOPartial = (utxos, redeemerBuilder) => import_effect5.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   if (utxos.length === 0) yield* collectError(ERROR_MESSAGE.EMPTY_UTXO);
+   if (redeemerBuilder.kind === "self") redeemerBuilder.inputs = utxos;
+   for (const utxo of utxos) {
+     if (utxo.datumHash && !utxo.datum) {
+-      const data = yield* $(
+-        import_effect4.Effect.tryPromise({
+-          try: () => datumOf(config.lucidConfig.provider, utxo),
+-          catch: (cause) => collectError({ cause })
+-        })
+-      );
+-      utxo.datum = import_plutus2.Data.to(data);
++      const data = yield* import_effect5.Effect.tryPromise({
++        try: () => datumOf(config.lucidConfig.provider, utxo),
++        catch: (cause) => collectError({ cause })
++      });
++      utxo.datum = import_plutus3.Data.to(data);
+     }
+     config.collectedInputs.push(utxo);
+   }
+-  const partialProgram = collectFromUTxO(config, utxos, false);
++  const partialProgram = collectFromUTxO(utxos, false);
+   config.partialPrograms.set(redeemerBuilder, partialProgram);
+ });
+ 
+ // src/tx-builder/internal/Read.ts
+-var import_effect5 = require("effect");
+-var import_plutus3 = require("@lucid-evolution/plutus");
++var import_effect6 = require("effect");
+ var import_utils6 = require("@lucid-evolution/utils");
+ var readError = (cause) => new TxBuilderError({ cause: `{ Read : ${cause} }` });
+-var readFrom = (config, utxos) => import_effect5.Effect.gen(function* () {
++var readFrom = (utxos) => import_effect6.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   if (utxos.length === 0) yield* readError(ERROR_MESSAGE.EMPTY_UTXO);
+   for (const utxo of utxos) {
+-    if (utxo.datumHash) {
+-      const data = yield* import_effect5.Effect.tryPromise({
+-        try: () => datumOf(config.lucidConfig.provider, utxo),
+-        catch: (cause) => readError(cause)
+-      });
+-      utxo.datum = import_plutus3.Data.to(data);
+-    }
+-    const coreUtxo = (0, import_utils6.utxoToCore)(utxo);
+-    config.readInputs.push(utxo);
++    const resolvedDatum = yield* resolveDatum(
++      utxo.datumHash,
++      utxo.datum,
++      config.lucidConfig.provider
++    );
++    const coreUtxo = (0, import_utils6.utxoToCore)({ ...utxo, datum: resolvedDatum });
+     config.txBuilder.add_reference_input(coreUtxo);
++    config.readInputs.push(utxo);
+   }
+ });
+ 
+ // src/tx-builder/internal/Attach.ts
+-var import_utils8 = require("@lucid-evolution/utils");
++var import_utils7 = require("@lucid-evolution/utils");
+ var attachScript = ({ type, script }) => {
+   switch (type) {
+     case "Native":
+@@ -407,18 +428,18 @@ var attachScript = ({ type, script }) => {
+       };
+     case "PlutusV1":
+       return {
+-        key: CML.PlutusV1Script.from_cbor_hex((0, import_utils8.applyDoubleCborEncoding)(script)).hash().to_hex(),
+-        value: { type, script: (0, import_utils8.applyDoubleCborEncoding)(script) }
++        key: CML.PlutusV1Script.from_cbor_hex((0, import_utils7.applyDoubleCborEncoding)(script)).hash().to_hex(),
++        value: { type, script: (0, import_utils7.applyDoubleCborEncoding)(script) }
+       };
+     case "PlutusV2":
+       return {
+-        key: CML.PlutusV2Script.from_cbor_hex((0, import_utils8.applyDoubleCborEncoding)(script)).hash().to_hex(),
+-        value: { type, script: (0, import_utils8.applyDoubleCborEncoding)(script) }
++        key: CML.PlutusV2Script.from_cbor_hex((0, import_utils7.applyDoubleCborEncoding)(script)).hash().to_hex(),
++        value: { type, script: (0, import_utils7.applyDoubleCborEncoding)(script) }
+       };
+     case "PlutusV3":
+       return {
+-        key: CML.PlutusV3Script.from_cbor_hex((0, import_utils8.applyDoubleCborEncoding)(script)).hash().to_hex(),
+-        value: { type, script: (0, import_utils8.applyDoubleCborEncoding)(script) }
++        key: CML.PlutusV3Script.from_cbor_hex((0, import_utils7.applyDoubleCborEncoding)(script)).hash().to_hex(),
++        value: { type, script: (0, import_utils7.applyDoubleCborEncoding)(script) }
+       };
+     default:
+       throw new Error(`Exhaustive check failed: Unhandled case ${type}`);
+@@ -432,14 +453,15 @@ var attachVoteValidator = (voteValidator) => attachScript(voteValidator);
+ var attachProposeValidator = (proposeValidator) => attachScript(proposeValidator);
+ 
+ // src/tx-builder/internal/Pay.ts
+-var import_effect6 = require("effect");
+-var import_utils9 = require("@lucid-evolution/utils");
++var import_effect7 = require("effect");
++var import_utils8 = require("@lucid-evolution/utils");
+ var payError = (cause) => new TxBuilderError({ cause: `{ Pay: ${cause} }` });
+-var payToAddress = (config, address, assets) => import_effect6.Effect.gen(function* () {
++var payToAddress = (address, assets) => import_effect7.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const outputBuilder = CML.TransactionOutputBuilder.new().with_address(yield* toCMLAddress(address, config.lucidConfig)).next();
+   if (Object.keys(assets).length == 0)
+     yield* payError(ERROR_MESSAGE.EMPTY_ASSETS);
+-  const value = (0, import_utils9.assetsToValue)(assets);
++  const value = (0, import_utils8.assetsToValue)(assets);
+   let outputResult = outputBuilder.with_asset_and_min_required_coin(
+     value.multi_asset(),
+     config.lucidConfig.protocolParameters.coinsPerUtxoByte
+@@ -451,20 +473,21 @@ var payToAddress = (config, address, assets) => import_effect6.Effect.gen(functi
+       outputResult = outputBuilder.with_value(value).build();
+     }
+   }
+-  config.totalOutputAssets = (0, import_utils9.addAssets)(
++  config.totalOutputAssets = (0, import_utils8.addAssets)(
+     config.totalOutputAssets,
+-    (0, import_utils9.valueToAssets)(outputResult.output().amount())
++    (0, import_utils8.valueToAssets)(outputResult.output().amount())
+   );
+   config.payToOutputs = [
+     ...config.payToOutputs,
+-    (0, import_utils9.coreToTxOutput)(outputResult.output())
++    (0, import_utils8.coreToTxOutput)(outputResult.output())
+   ];
+   config.txBuilder.add_output(outputResult);
+ });
+-var payToAddressWithData = (config, address, outputDatum, assets, scriptRef) => import_effect6.Effect.gen(function* () {
++var ToAddressWithData = (address, outputDatum, assets, scriptRef) => import_effect7.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const outputBuilder = buildBaseOutput(address, outputDatum, scriptRef);
+   assets ??= {};
+-  const value = (0, import_utils9.assetsToValue)(assets);
++  const value = (0, import_utils8.assetsToValue)(assets);
+   let outputResult = outputBuilder.with_asset_and_min_required_coin(
+     value.multi_asset(),
+     config.lucidConfig.protocolParameters.coinsPerUtxoByte
+@@ -476,61 +499,62 @@ var payToAddressWithData = (config, address, outputDatum, assets, scriptRef) =>
+       outputResult = outputBuilder.with_value(value).build();
+     }
+   }
+-  config.totalOutputAssets = (0, import_utils9.addAssets)(
++  config.totalOutputAssets = (0, import_utils8.addAssets)(
+     config.totalOutputAssets,
+-    (0, import_utils9.valueToAssets)(outputResult.output().amount())
++    (0, import_utils8.valueToAssets)(outputResult.output().amount())
+   );
+   config.payToOutputs = [
+     ...config.payToOutputs,
+-    (0, import_utils9.coreToTxOutput)(outputResult.output())
++    (0, import_utils8.coreToTxOutput)(outputResult.output())
+   ];
+   config.txBuilder.add_output(outputResult);
+ });
+-var payToContract = (config, address, outputDatum, assets, scriptRef) => import_effect6.Effect.gen(function* () {
+-  if (!outputDatum.value) yield* payError(ERROR_MESSAGE.DATUM_NOT_SET);
+-  return yield* payToAddressWithData(
+-    config,
+-    address,
+-    outputDatum,
+-    assets,
+-    scriptRef
+-  );
+-});
++var ToContract = (address, outputDatum, assets, scriptRef) => ToAddressWithData(address, outputDatum, assets, scriptRef);
+ var buildBaseOutput = (address, outputDatum, scriptRef) => {
+   let baseBuilder;
+   const addressBuilder = CML.TransactionOutputBuilder.new().with_address(
+     CML.Address.from_bech32(address)
+   );
+-  switch (outputDatum.kind) {
+-    case "hash": {
+-      const datumOption = CML.DatumOption.new_hash(
+-        CML.DatumHash.from_hex(outputDatum.value)
++  if (outputDatum) {
++    if (outputDatum.value.trim() === "") {
++      throw new Error(
++        "datum value is missing. Please provide a non-empty cbor hex data."
+       );
+-      baseBuilder = addressBuilder.with_data(datumOption);
+-      break;
+-    }
+-    case "asHash": {
+-      const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
+-      baseBuilder = addressBuilder.with_communication_data(plutusData);
+-      break;
+     }
+-    case "inline": {
+-      const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
+-      const datumOption = CML.DatumOption.new_datum(plutusData);
+-      baseBuilder = addressBuilder.with_data(datumOption);
+-      break;
++    switch (outputDatum.kind) {
++      case "hash": {
++        const datumOption = CML.DatumOption.new_hash(
++          CML.DatumHash.from_hex(outputDatum.value)
++        );
++        baseBuilder = addressBuilder.with_data(datumOption);
++        break;
++      }
++      case "asHash": {
++        const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
++        baseBuilder = addressBuilder.with_communication_data(plutusData);
++        break;
++      }
++      case "inline": {
++        const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
++        const datumOption = CML.DatumOption.new_datum(plutusData);
++        baseBuilder = addressBuilder.with_data(datumOption);
++        break;
++      }
++      default:
++        throw new Error(`Unknown outputDatum: ${outputDatum}`);
+     }
+-    default:
+-      throw new Error(`Unknown outputDatum: ${outputDatum}`);
++  } else {
++    baseBuilder = addressBuilder;
+   }
+-  return scriptRef ? baseBuilder.with_reference_script((0, import_utils9.toScriptRef)(scriptRef)).next() : baseBuilder.next();
++  return scriptRef ? baseBuilder.with_reference_script((0, import_utils8.toScriptRef)(scriptRef)).next() : baseBuilder.next();
+ };
+ 
+ // src/tx-builder/internal/Mint.ts
+-var import_effect7 = require("effect");
++var import_effect8 = require("effect");
+ var CML4 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+ var mintError = (cause) => new TxBuilderError({ cause: `{ Mint: ${cause} }` });
+-var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(function* () {
++var mintAssets = (assets) => (redeemer) => import_effect8.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const units = Object.keys(assets);
+   const policyId = units[0].slice(0, 56);
+   const mintAssets2 = CML4.MapAssetNameToNonZeroInt64.new();
+@@ -541,9 +565,9 @@ var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(fun
+     mintAssets2.insert(CML4.AssetName.from_hex(unit.slice(56)), assets[unit]);
+   }
+   const mintBuilder = CML4.SingleMintBuilder.new(mintAssets2);
+-  const policy = yield* (0, import_effect7.pipe)(
+-    import_effect7.Effect.fromNullable(config.scripts.get(policyId)),
+-    import_effect7.Effect.orElseFail(
++  const policy = yield* (0, import_effect8.pipe)(
++    import_effect8.Effect.fromNullable(config.scripts.get(policyId)),
++    import_effect8.Effect.orElseFail(
+       () => mintError(ERROR_MESSAGE.MISSING_POLICY(policyId))
+     )
+   );
+@@ -557,9 +581,9 @@ var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(fun
+       );
+       break;
+     case "PlutusV1": {
+-      const red = yield* (0, import_effect7.pipe)(
+-        import_effect7.Effect.fromNullable(redeemer),
+-        import_effect7.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++      const red = yield* (0, import_effect8.pipe)(
++        import_effect8.Effect.fromNullable(redeemer),
++        import_effect8.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -570,9 +594,9 @@ var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(fun
+       break;
+     }
+     case "PlutusV2": {
+-      const red = yield* (0, import_effect7.pipe)(
+-        import_effect7.Effect.fromNullable(redeemer),
+-        import_effect7.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++      const red = yield* (0, import_effect8.pipe)(
++        import_effect8.Effect.fromNullable(redeemer),
++        import_effect8.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -583,9 +607,9 @@ var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(fun
+       break;
+     }
+     case "PlutusV3": {
+-      const red = yield* (0, import_effect7.pipe)(
+-        import_effect7.Effect.fromNullable(redeemer),
+-        import_effect7.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++      const red = yield* (0, import_effect8.pipe)(
++        import_effect8.Effect.fromNullable(redeemer),
++        import_effect8.Effect.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -599,59 +623,64 @@ var mintAssets = (config, assets) => (redeemer) => import_effect7.Effect.gen(fun
+ });
+ 
+ // src/tx-builder/internal/Interval.ts
+-var import_effect8 = require("effect");
+-var import_utils10 = require("@lucid-evolution/utils");
+-var validFrom = (config, unixTime) => import_effect8.Effect.gen(function* () {
+-  const slot = (0, import_utils10.unixTimeToSlot)(config.lucidConfig.network, unixTime);
++var import_effect9 = require("effect");
++var import_utils9 = require("@lucid-evolution/utils");
++var validFrom = (unixTime) => import_effect9.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const slot = (0, import_utils9.unixTimeToSlot)(config.lucidConfig.network, unixTime);
+   config.txBuilder.set_validity_start_interval(BigInt(slot));
+ });
+-var validTo = (config, unixTime) => import_effect8.Effect.gen(function* () {
+-  const slot = (0, import_utils10.unixTimeToSlot)(config.lucidConfig.network, unixTime);
++var validTo = (unixTime) => import_effect9.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const slot = (0, import_utils9.unixTimeToSlot)(config.lucidConfig.network, unixTime);
+   config.txBuilder.set_ttl(BigInt(slot));
+ });
+ 
+ // src/tx-builder/internal/Signer.ts
+-var import_effect9 = require("effect");
++var import_effect10 = require("effect");
+ var CML5 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+ var addSignerError = (cause) => new TxBuilderError({ cause: `{ Signer: ${cause} }` });
+-var addSigner = (config, address) => import_effect9.Effect.gen(function* () {
++var addSigner = (address) => import_effect10.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* validateAddressDetails(
+     address,
+     config.lucidConfig
+   );
+-  const credential = addressDetails.type === "Reward" ? yield* (0, import_effect9.pipe)(
+-    import_effect9.Effect.fromNullable(addressDetails.stakeCredential),
+-    import_effect9.Effect.orElseFail(
++  const credential = addressDetails.type === "Reward" ? yield* (0, import_effect10.pipe)(
++    import_effect10.Effect.fromNullable(addressDetails.stakeCredential),
++    import_effect10.Effect.orElseFail(
+       () => addSignerError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+-  ) : yield* (0, import_effect9.pipe)(
+-    import_effect9.Effect.fromNullable(addressDetails.paymentCredential),
+-    import_effect9.Effect.orElseFail(
++  ) : yield* (0, import_effect10.pipe)(
++    import_effect10.Effect.fromNullable(addressDetails.paymentCredential),
++    import_effect10.Effect.orElseFail(
+       () => addSignerError(ERROR_MESSAGE.MISSING_PAYMENT_CREDENTIAL)
+     )
+   );
+   if (credential.type === "Script")
+     yield* addSignerError(ERROR_MESSAGE.SCRIPT_CREDENTIAL_NOT_ALLOWED);
+   return credential.hash;
+-}).pipe(import_effect9.Effect.flatMap((keyHash) => addSignerKey(config, keyHash)));
+-var addSignerKey = (config, keyHash) => import_effect9.Effect.gen(function* () {
++}).pipe(import_effect10.Effect.flatMap((keyHash) => addSignerKey(keyHash)));
++var addSignerKey = (keyHash) => import_effect10.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   config.txBuilder.add_required_signer(CML5.Ed25519KeyHash.from_hex(keyHash));
+ });
+ 
+ // src/tx-builder/internal/Stake.ts
+-var import_effect10 = require("effect");
++var import_effect11 = require("effect");
+ var CML6 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+ var stakeError = (cause) => new TxBuilderError({ cause: `{ Stake: ${cause} }` });
+-var registerStake = (config, rewardAddress) => import_effect10.Effect.gen(function* () {
+-  const addressDetails = yield* (0, import_effect10.pipe)(
++var registerStake = (rewardAddress) => import_effect11.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const addressDetails = yield* (0, import_effect11.pipe)(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    import_effect10.Effect.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect10.Effect.succeed(address)
++    import_effect11.Effect.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect11.Effect.succeed(address)
+     )
+   );
+-  const stakeCredential = yield* (0, import_effect10.pipe)(
+-    import_effect10.Effect.fromNullable(addressDetails.stakeCredential),
+-    import_effect10.Effect.orElseFail(
++  const stakeCredential = yield* (0, import_effect11.pipe)(
++    import_effect11.Effect.fromNullable(addressDetails.stakeCredential),
++    import_effect11.Effect.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -665,16 +694,17 @@ var registerStake = (config, rewardAddress) => import_effect10.Effect.gen(functi
+   );
+   config.txBuilder.add_cert(certBuilder.skip_witness());
+ });
+-var deRegisterStake = (config, rewardAddress, redeemer) => import_effect10.Effect.gen(function* () {
+-  const addressDetails = yield* (0, import_effect10.pipe)(
++var deRegisterStake = (rewardAddress, redeemer) => import_effect11.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const addressDetails = yield* (0, import_effect11.pipe)(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    import_effect10.Effect.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect10.Effect.succeed(address)
++    import_effect11.Effect.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect11.Effect.succeed(address)
+     )
+   );
+-  const stakeCredential = yield* (0, import_effect10.pipe)(
+-    import_effect10.Effect.fromNullable(addressDetails.stakeCredential),
+-    import_effect10.Effect.orElseFail(
++  const stakeCredential = yield* (0, import_effect11.pipe)(
++    import_effect11.Effect.fromNullable(addressDetails.stakeCredential),
++    import_effect11.Effect.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -700,15 +730,15 @@ var deRegisterStake = (config, rewardAddress, redeemer) => import_effect10.Effec
+         CML6.ScriptHash.from_hex(stakeCredential.hash)
+       );
+       const certBuilder = createCertBuilder(credential, config);
+-      const script = yield* (0, import_effect10.pipe)(
+-        import_effect10.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        import_effect10.Effect.orElseFail(
++      const script = yield* (0, import_effect11.pipe)(
++        import_effect11.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
++        import_effect11.Effect.orElseFail(
+           () => stakeError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+-      const handleRedeemer = () => (0, import_effect10.pipe)(
+-        import_effect10.Effect.fromNullable(redeemer),
+-        import_effect10.Effect.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
++      const handleRedeemer = () => (0, import_effect11.pipe)(
++        import_effect11.Effect.fromNullable(redeemer),
++        import_effect11.Effect.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       switch (script.type) {
+         case "PlutusV1": {
+@@ -754,35 +784,36 @@ var deRegisterStake = (config, rewardAddress, redeemer) => import_effect10.Effec
+     }
+   }
+ });
+-var withdraw = (config, rewardAddress, amount) => (redeemer) => import_effect10.Effect.gen(function* ($) {
+-  const addressDetails = yield* (0, import_effect10.pipe)(
++var withdraw = (rewardAddress, amount) => (redeemer) => import_effect11.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const addressDetails = yield* (0, import_effect11.pipe)(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    import_effect10.Effect.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect10.Effect.succeed(address)
++    import_effect11.Effect.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect11.Effect.succeed(address)
+     )
+   );
+-  const withdrawBuilder = yield* (0, import_effect10.pipe)(
+-    import_effect10.Effect.fromNullable(
++  const withdrawBuilder = yield* (0, import_effect11.pipe)(
++    import_effect11.Effect.fromNullable(
+       CML6.RewardAddress.from_address(
+         CML6.Address.from_bech32(rewardAddress)
+       )
+     ),
+-    import_effect10.Effect.orElseFail(
++    import_effect11.Effect.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     ),
+-    import_effect10.Effect.andThen(
++    import_effect11.Effect.andThen(
+       (address) => CML6.SingleWithdrawalBuilder.new(address, amount)
+     )
+   );
+-  const stakeCredential = yield* (0, import_effect10.pipe)(
+-    import_effect10.Effect.fromNullable(addressDetails.stakeCredential),
+-    import_effect10.Effect.orElseFail(
++  const stakeCredential = yield* (0, import_effect11.pipe)(
++    import_effect11.Effect.fromNullable(addressDetails.stakeCredential),
++    import_effect11.Effect.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+-  const handleRedeemer = () => (0, import_effect10.pipe)(
+-    import_effect10.Effect.fromNullable(redeemer),
+-    import_effect10.Effect.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
++  const handleRedeemer = () => (0, import_effect11.pipe)(
++    import_effect11.Effect.fromNullable(redeemer),
++    import_effect11.Effect.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
+   );
+   switch (stakeCredential.type) {
+     case "Key": {
+@@ -790,9 +821,9 @@ var withdraw = (config, rewardAddress, amount) => (redeemer) => import_effect10.
+       break;
+     }
+     case "Script": {
+-      const script = yield* (0, import_effect10.pipe)(
+-        import_effect10.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        import_effect10.Effect.orElseFail(
++      const script = yield* (0, import_effect11.pipe)(
++        import_effect11.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
++        import_effect11.Effect.orElseFail(
+           () => stakeError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+@@ -842,20 +873,21 @@ var withdraw = (config, rewardAddress, amount) => (redeemer) => import_effect10.
+ });
+ 
+ // src/tx-builder/internal/Pool.ts
+-var import_effect11 = require("effect");
++var import_effect12 = require("effect");
+ var CML7 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+ var import_core_utils = require("@lucid-evolution/core-utils");
+ var poolError = (cause) => new TxBuilderError({ cause: `{ Pool : ${cause} }` });
+-var delegateTo = (config, rewardAddress, poolId, redeemer) => import_effect11.Effect.gen(function* () {
+-  const addressDetails = yield* (0, import_effect11.pipe)(
++var delegateTo = (rewardAddress, poolId, redeemer) => import_effect12.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const addressDetails = yield* (0, import_effect12.pipe)(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    import_effect11.Effect.andThen(
+-      (address) => address.type !== "Reward" ? poolError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect11.Effect.succeed(address)
++    import_effect12.Effect.andThen(
++      (address) => address.type !== "Reward" ? poolError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : import_effect12.Effect.succeed(address)
+     )
+   );
+-  const stakeCredential = yield* (0, import_effect11.pipe)(
+-    import_effect11.Effect.fromNullable(addressDetails.stakeCredential),
+-    import_effect11.Effect.orElseFail(
++  const stakeCredential = yield* (0, import_effect12.pipe)(
++    import_effect12.Effect.fromNullable(addressDetails.stakeCredential),
++    import_effect12.Effect.orElseFail(
+       () => poolError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -883,15 +915,15 @@ var delegateTo = (config, rewardAddress, poolId, redeemer) => import_effect11.Ef
+           CML7.Ed25519KeyHash.from_bech32(poolId)
+         )
+       );
+-      const script = yield* (0, import_effect11.pipe)(
+-        import_effect11.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        import_effect11.Effect.orElseFail(
++      const script = yield* (0, import_effect12.pipe)(
++        import_effect12.Effect.fromNullable(config.scripts.get(stakeCredential.hash)),
++        import_effect12.Effect.orElseFail(
+           () => poolError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+-      const handleRedeemer = () => (0, import_effect11.pipe)(
+-        import_effect11.Effect.fromNullable(redeemer),
+-        import_effect11.Effect.orElseFail(() => poolError(ERROR_MESSAGE.MISSING_REDEEMER))
++      const handleRedeemer = () => (0, import_effect12.pipe)(
++        import_effect12.Effect.fromNullable(redeemer),
++        import_effect12.Effect.orElseFail(() => poolError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       switch (script.type) {
+         case "PlutusV1": {
+@@ -941,8 +973,9 @@ var delegateTo = (config, rewardAddress, poolId, redeemer) => import_effect11.Ef
+ // src/tx-builder/internal/Governance.ts
+ var import_core_types = require("@lucid-evolution/core-types");
+ var CML8 = __toESM(require("@anastasia-labs/cardano-multiplatform-lib-nodejs"), 1);
+-var import_effect12 = require("effect");
+-var delegateVoteToDRep = (config, rewardAddress, drep, redeemer) => import_effect12.Effect.gen(function* () {
++var import_effect13 = require("effect");
++var delegateVoteToDRep = (rewardAddress, drep, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -953,7 +986,8 @@ var delegateVoteToDRep = (config, rewardAddress, drep, redeemer) => import_effec
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var delegateVoteToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer) => import_effect12.Effect.gen(function* () {
++var delegateVoteToPoolAndDRep = (rewardAddress, poolId, drep, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -968,7 +1002,8 @@ var delegateVoteToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer)
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToPool = (config, rewardAddress, poolId, redeemer) => import_effect12.Effect.gen(function* () {
++var registerAndDelegateToPool = (rewardAddress, poolId, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -982,7 +1017,8 @@ var registerAndDelegateToPool = (config, rewardAddress, poolId, redeemer) => imp
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToDRep = (config, rewardAddress, drep, redeemer) => import_effect12.Effect.gen(function* () {
++var registerAndDelegateToDRep = (rewardAddress, drep, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -997,7 +1033,8 @@ var registerAndDelegateToDRep = (config, rewardAddress, drep, redeemer) => impor
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer) => import_effect12.Effect.gen(function* () {
++var registerAndDelegateToPoolAndDRep = (rewardAddress, poolId, drep, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1013,7 +1050,8 @@ var registerAndDelegateToPoolAndDRep = (config, rewardAddress, poolId, drep, red
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerDRep = (config, rewardAddress, anchor, redeemer) => import_effect12.Effect.gen(function* () {
++var registerDRep = (rewardAddress, anchor, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1031,7 +1069,8 @@ var registerDRep = (config, rewardAddress, anchor, redeemer) => import_effect12.
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var deregisterDRep = (config, rewardAddress, redeemer) => import_effect12.Effect.gen(function* () {
++var deregisterDRep = (rewardAddress, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1044,7 +1083,8 @@ var deregisterDRep = (config, rewardAddress, redeemer) => import_effect12.Effect
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var updateDRep = (config, rewardAddress, anchor, redeemer) => import_effect12.Effect.gen(function* () {
++var updateDRep = (rewardAddress, anchor, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1058,7 +1098,8 @@ var updateDRep = (config, rewardAddress, anchor, redeemer) => import_effect12.Ef
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var authCommitteeHot = (config, coldAddress, hotAddress, redeemer) => import_effect12.Effect.gen(function* () {
++var authCommitteeHot = (coldAddress, hotAddress, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const coldCred = yield* validateAndGetStakeCredential(coldAddress, config);
+   const hotCred = yield* validateAndGetStakeCredential(hotAddress, config);
+   const hotCredential = hotCred.type === "Key" ? CML8.Credential.new_pub_key(CML8.Ed25519KeyHash.from_hex(hotCred.hash)) : CML8.Credential.new_script(CML8.ScriptHash.from_hex(hotCred.hash));
+@@ -1067,7 +1108,8 @@ var authCommitteeHot = (config, coldAddress, hotAddress, redeemer) => import_eff
+   );
+   yield* processCertificate(coldCred, config, buildCert, redeemer);
+ });
+-var resignCommitteeHot = (config, coldAddress, anchor, redeemer) => import_effect12.Effect.gen(function* () {
++var resignCommitteeHot = (coldAddress, anchor, redeemer) => import_effect13.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   const coldCred = yield* validateAndGetStakeCredential(coldAddress, config);
+   const cmlAnchor = anchor ? CML8.Anchor.new(
+     CML8.Url.from_json(anchor.url),
+@@ -1080,10 +1122,10 @@ var resignCommitteeHot = (config, coldAddress, anchor, redeemer) => import_effec
+ });
+ 
+ // src/tx-builder/internal/Metadata.ts
+-var import_effect13 = require("effect");
++var import_effect14 = require("effect");
+ var S = __toESM(require("@effect/schema/Schema"), 1);
+ var import_core_utils2 = require("@lucid-evolution/core-utils");
+-var attachMetadata = (config, label, metadata) => import_effect13.Effect.gen(function* () {
++var attachMetadata = (config, label, metadata) => import_effect14.Effect.gen(function* () {
+   const auxiliaryData = CML.AuxiliaryData.new();
+   const meta = CML.Metadata.new();
+   meta.set(
+@@ -1133,20 +1175,20 @@ var toCardanoMetadata = (json) => {
+ };
+ 
+ // src/tx-builder/internal/CompleteTxBuilder.ts
+-var import_effect17 = require("effect");
++var import_effect18 = require("effect");
+ var UPLC = __toESM(require("@lucid-evolution/uplc"), 1);
+ 
+ // src/tx-sign-builder/TxSignBuilder.ts
+ var S3 = __toESM(require("@effect/schema/Schema"), 1);
+ 
+ // src/tx-sign-builder/internal/CompleteTxSigner.ts
+-var import_effect16 = require("effect");
++var import_effect17 = require("effect");
+ 
+ // src/tx-submit/TxSubmit.ts
+-var import_effect14 = require("effect");
++var import_effect15 = require("effect");
+ var S2 = __toESM(require("@effect/schema/Schema"), 1);
+ var makeSubmit = (wallet, txSigned) => {
+-  const submit = (options) => import_effect14.Effect.tryPromise({
++  const submit = (options) => import_effect15.Effect.tryPromise({
+     try: () => wallet.submitTx(
+       options.canonical ? txSigned.to_canonical_cbor_hex() : txSigned.to_cbor_hex()
+     ),
+@@ -1164,62 +1206,62 @@ var makeSubmit = (wallet, txSigned) => {
+ };
+ 
+ // src/tx-sign-builder/internal/Sign.ts
+-var import_effect15 = require("effect");
++var import_effect16 = require("effect");
+ var signError = (cause) => new TxSignerError({ cause });
+-var mkWitnessFromWallet = (wallet, txComplete) => (0, import_effect15.pipe)(
+-  import_effect15.Effect.fromNullable(wallet),
+-  import_effect15.Effect.catchAll(() => signError(ERROR_MESSAGE.MISSING_WALLET)),
+-  import_effect15.Effect.tryMapPromise({
++var mkWitnessFromWallet = (wallet, txComplete) => (0, import_effect16.pipe)(
++  import_effect16.Effect.fromNullable(wallet),
++  import_effect16.Effect.catchAll(() => signError(ERROR_MESSAGE.MISSING_WALLET)),
++  import_effect16.Effect.tryMapPromise({
+     try: (wallet2) => wallet2.signTx(txComplete),
+     catch: (cause) => signError(cause)
+   })
+ );
+-var withWallet = (config) => (0, import_effect15.pipe)(
+-  mkWitnessFromWallet(config.lucidConfig.wallet, config.txComplete),
+-  import_effect15.Effect.map((witness) => config.witnessSetBuilder.add_existing(witness))
++var withWallet = (config) => (0, import_effect16.pipe)(
++  mkWitnessFromWallet(config.wallet, config.txComplete),
++  import_effect16.Effect.map((witness) => config.witnessSetBuilder.add_existing(witness))
+ );
+-var partialWithWallet = (config) => (0, import_effect15.pipe)(
+-  mkWitnessFromWallet(config.lucidConfig.wallet, config.txComplete),
+-  import_effect15.Effect.map((witness) => witness.to_cbor_hex())
++var partialWithWallet = (config) => (0, import_effect16.pipe)(
++  mkWitnessFromWallet(config.wallet, config.txComplete),
++  import_effect16.Effect.map((witness) => witness.to_cbor_hex())
+ );
+-var mkWitnessFromPrivateKey = (privateKey, txComplete) => (0, import_effect15.pipe)(
+-  import_effect15.Effect.try({
++var mkWitnessFromPrivateKey = (privateKey, txComplete) => (0, import_effect16.pipe)(
++  import_effect16.Effect.try({
+     try: () => CML.PrivateKey.from_bech32(privateKey),
+     catch: signError
+   }),
+-  import_effect15.Effect.map(
++  import_effect16.Effect.map(
+     (privateKey2) => CML.make_vkey_witness(
+       CML.hash_transaction(txComplete.body()),
+       privateKey2
+     )
+   )
+ );
+-var withPrivateKey = (config, privateKey) => (0, import_effect15.pipe)(
++var withPrivateKey = (config, privateKey) => (0, import_effect16.pipe)(
+   mkWitnessFromPrivateKey(privateKey, config.txComplete),
+-  import_effect15.Effect.map((witness) => config.witnessSetBuilder.add_vkey(witness))
++  import_effect16.Effect.map((witness) => config.witnessSetBuilder.add_vkey(witness))
+ );
+-var partialWithPrivateKey = (config, privateKey) => (0, import_effect15.pipe)(
++var partialWithPrivateKey = (config, privateKey) => (0, import_effect16.pipe)(
+   mkWitnessFromPrivateKey(privateKey, config.txComplete),
+-  import_effect15.Effect.map((witness) => {
++  import_effect16.Effect.map((witness) => {
+     const witnessBuilder = CML.TransactionWitnessSetBuilder.new();
+     witnessBuilder.add_vkey(witness);
+     return witnessBuilder.build().to_cbor_hex();
+   })
+ );
+-var assemble = (config, witnesses) => import_effect15.Effect.forEach(
++var assemble = (config, witnesses) => import_effect16.Effect.forEach(
+   witnesses,
+-  (witness) => (0, import_effect15.pipe)(
+-    import_effect15.Effect.try({
++  (witness) => (0, import_effect16.pipe)(
++    import_effect16.Effect.try({
+       try: () => CML.TransactionWitnessSet.from_cbor_hex(witness),
+       catch: signError
+     }),
+-    import_effect15.Effect.map((witness2) => config.witnessSetBuilder.add_existing(witness2))
++    import_effect16.Effect.map((witness2) => config.witnessSetBuilder.add_existing(witness2))
+   )
+ );
+ 
+ // src/tx-sign-builder/internal/CompleteTxSigner.ts
+-var completeTxSigner = (config) => import_effect16.Effect.gen(function* () {
+-  yield* import_effect16.Effect.all(config.programs, { concurrency: "unbounded" });
++var completeTxSigner = (config) => import_effect17.Effect.gen(function* () {
++  yield* import_effect17.Effect.all(config.programs, { concurrency: "unbounded" });
+   const plutus_datums = config.txComplete.witness_set().plutus_datums();
+   config.witnessSetBuilder.add_existing(config.txComplete.witness_set());
+   if (plutus_datums) {
+@@ -1234,15 +1276,15 @@ var completeTxSigner = (config) => import_effect16.Effect.gen(function* () {
+     true,
+     config.txComplete.auxiliary_data()
+   );
+-  const wallet = yield* (0, import_effect16.pipe)(
+-    import_effect16.Effect.fromNullable(config.lucidConfig.wallet),
+-    import_effect16.Effect.orElseFail(() => signError(ERROR_MESSAGE.MISSING_WALLET))
++  const wallet = yield* (0, import_effect17.pipe)(
++    import_effect17.Effect.fromNullable(config.wallet),
++    import_effect17.Effect.orElseFail(() => signError(ERROR_MESSAGE.MISSING_WALLET))
+   );
+   return makeSubmit(wallet, signedTx);
+-}).pipe(import_effect16.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
++}).pipe(import_effect17.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
+ 
+ // src/tx-sign-builder/TxSignBuilder.ts
+-var makeTxSignBuilder = (lucidConfig, tx) => {
++var makeTxSignBuilder = (wallet, tx) => {
+   const redeemers = tx.witness_set().redeemers();
+   const exUnits = { cpu: 0, mem: 0 };
+   if (redeemers) {
+@@ -1269,7 +1311,7 @@ var makeTxSignBuilder = (lucidConfig, tx) => {
+     txComplete: tx,
+     witnessSetBuilder: CML.TransactionWitnessSetBuilder.new(),
+     programs: [],
+-    lucidConfig,
++    wallet,
+     fee: parseInt(tx.body().fee().toString()),
+     exUnits
+   };
+@@ -1311,15 +1353,17 @@ var makeTxSignBuilder = (lucidConfig, tx) => {
+ };
+ 
+ // src/tx-builder/internal/CompleteTxBuilder.ts
+-var import_utils11 = require("@lucid-evolution/utils");
++var import_utils10 = require("@lucid-evolution/utils");
+ var import_plutus4 = require("@lucid-evolution/plutus");
++var import_Predicate = require("effect/Predicate");
+ var completeTxError = (cause) => new TxBuilderError({ cause: `{ Complete: ${cause} }` });
+-var complete = (config, options = {}) => import_effect17.Effect.gen(function* () {
+-  const wallet = yield* (0, import_effect17.pipe)(
+-    import_effect17.Effect.fromNullable(config.lucidConfig.wallet),
+-    import_effect17.Effect.orElseFail(() => completeTxError(ERROR_MESSAGE.MISSING_WALLET))
++var complete = (options = {}) => import_effect18.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const wallet = yield* (0, import_effect18.pipe)(
++    import_effect18.Effect.fromNullable(config.lucidConfig.wallet),
++    import_effect18.Effect.orElseFail(() => completeTxError(ERROR_MESSAGE.MISSING_WALLET))
+   );
+-  const walletAddress = yield* import_effect17.Effect.promise(() => wallet.address());
++  const walletAddress = yield* import_effect18.Effect.promise(() => wallet.address());
+   const {
+     coinSelection = true,
+     changeAddress = walletAddress,
+@@ -1329,24 +1373,15 @@ var complete = (config, options = {}) => import_effect17.Effect.gen(function* ()
+     includeLeftoverLovelaceAsFee = false,
+     presetWalletInputs = []
+   } = options;
+-  const walletInputs = presetWalletInputs.length === 0 ? yield* import_effect17.Effect.tryPromise({
++  const walletInputs = presetWalletInputs.length === 0 ? yield* import_effect18.Effect.tryPromise({
+     try: () => wallet.getUtxos(),
+     catch: (error) => completeTxError(error)
+   }) : presetWalletInputs;
+-  yield* import_effect17.Effect.all(config.programs);
++  yield* import_effect18.Effect.all(config.programs);
+   const hasPlutusScriptExecutions = Array.from(
+     config.scripts.values()
+   ).some((value) => value.type !== "Native");
+-  if (hasPlutusScriptExecutions) {
+-    const collateralInput = yield* findCollateral(
+-      config.lucidConfig.protocolParameters.coinsPerUtxoByte,
+-      setCollateral,
+-      walletInputs
+-    );
+-    applyCollateral(config, setCollateral, collateralInput, changeAddress);
+-  }
+   yield* selectionAndEvaluation(
+-    config,
+     walletInputs,
+     changeAddress,
+     coinSelection,
+@@ -1354,9 +1389,23 @@ var complete = (config, options = {}) => import_effect17.Effect.gen(function* ()
+     includeLeftoverLovelaceAsFee,
+     false
+   );
+-  if (hasPlutusScriptExecutions)
++  if (hasPlutusScriptExecutions) {
++    const minFee = config.txBuilder.min_fee(true);
++    const refScriptFee = yield* calculateMinRefScriptFee(config);
++    let estimatedFee = minFee + refScriptFee;
++    const totalCollateral = BigInt(
++      Math.max(
++        config.lucidConfig.protocolParameters.collateralPercentage * Number(estimatedFee) / 100,
++        Number(setCollateral)
++      )
++    );
++    const collateralInput = yield* findCollateral(
++      config.lucidConfig.protocolParameters.coinsPerUtxoByte,
++      totalCollateral,
++      walletInputs
++    );
++    yield* applyCollateral(totalCollateral, collateralInput, changeAddress);
+     yield* selectionAndEvaluation(
+-      config,
+       walletInputs,
+       changeAddress,
+       coinSelection,
+@@ -1364,11 +1413,12 @@ var complete = (config, options = {}) => import_effect17.Effect.gen(function* ()
+       includeLeftoverLovelaceAsFee,
+       true
+     );
++  }
+   config.txBuilder.add_change_if_needed(
+     CML.Address.from_bech32(changeAddress),
+     true
+   );
+-  const transaction = yield* import_effect17.Effect.try({
++  const transaction = yield* import_effect18.Effect.try({
+     try: () => config.txBuilder.build(
+       CML.ChangeSelectionAlgo.Default,
+       CML.Address.from_bech32(changeAddress)
+@@ -1379,26 +1429,27 @@ var complete = (config, options = {}) => import_effect17.Effect.gen(function* ()
+   const derivedWalletInputs = derivedInputs.filter(
+     (utxo) => utxo.address === walletAddress
+   );
+-  const updatedWalletInputs = (0, import_effect17.pipe)(
+-    import_effect17.Array.differenceWith(import_utils11.isEqualUTxO)(walletInputs, config.consumedInputs),
++  const updatedWalletInputs = (0, import_effect18.pipe)(
++    import_effect18.Array.differenceWith(import_utils10.isEqualUTxO)(walletInputs, config.consumedInputs),
+     (availableWalletInputs) => [
+       ...derivedWalletInputs,
+       ...availableWalletInputs
+     ]
+   );
+-  return import_effect17.Tuple.make(
++  return import_effect18.Tuple.make(
+     updatedWalletInputs,
+     derivedInputs,
+     makeTxSignBuilder(
+-      config.lucidConfig,
++      config.lucidConfig.wallet,
+       canonical ? CML.Transaction.from_cbor_bytes(
+         transaction.to_canonical_cbor_bytes()
+       ) : transaction
+     )
+   );
+-}).pipe(import_effect17.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
+-var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection, localUPLCEval, includeLeftoverLovelaceAsFee, script_calculation) => import_effect17.Effect.gen(function* () {
+-  const availableInputs = import_effect17.Array.differenceWith(import_utils11.isEqualUTxO)(
++}).pipe(import_effect18.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
++var selectionAndEvaluation = (walletInputs, changeAddress, coinSelection, localUPLCEval, includeLeftoverLovelaceAsFee, script_calculation) => import_effect18.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const availableInputs = import_effect18.Array.differenceWith(import_utils10.isEqualUTxO)(
+     walletInputs,
+     config.collectedInputs
+   );
+@@ -1407,16 +1458,16 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+     availableInputs,
+     script_calculation,
+     includeLeftoverLovelaceAsFee
+-  ) : { selected: [], burnable: {} };
++  ) : { selected: [], burnable: { lovelace: 0n } };
+   let estimatedFee = 0n;
+-  if (import_effect17.Array.isEmptyArray(inputsToAdd)) {
++  if (import_effect18.Array.isEmptyArray(inputsToAdd)) {
+     if (script_calculation) return;
+     estimatedFee += burnable.lovelace;
+   }
+-  if (import_effect17.Array.isNonEmptyArray(inputsToAdd)) {
++  if (import_effect18.Array.isNonEmptyArray(inputsToAdd)) {
+     for (const utxo of inputsToAdd) {
+       const input = CML.SingleInputBuilder.from_transaction_unspent_output(
+-        (0, import_utils11.utxoToCore)(utxo)
++        (0, import_utils10.utxoToCore)(utxo)
+       ).payment_key();
+       config.txBuilder.add_input(input);
+     }
+@@ -1429,9 +1480,9 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+       yield* completeTxError(
+         `RedeemerBuilder: Coin selection had to be updated after building redeemers, possibly leading to incorrect indices. Try setting a minimum fee of ${estimatedFee} lovelaces.`
+       );
+-    } else yield* completePartialPrograms(config);
++    } else yield* completePartialPrograms();
+   }
+-  const txRedeemerBuilder = yield* import_effect17.Effect.try({
++  const txRedeemerBuilder = yield* import_effect18.Effect.try({
+     try: () => config.txBuilder.build_for_evaluation(
+       0,
+       CML.Address.from_bech32(changeAddress)
+@@ -1455,9 +1506,10 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+       );
+     }
+   }
+-}).pipe(import_effect17.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
+-var completePartialPrograms = (config) => import_effect17.Effect.gen(function* () {
+-  const sortedInputs = (0, import_utils11.sortUTxOs)(config.collectedInputs, "Canonical");
++}).pipe(import_effect18.Effect.catchAllDefect((cause) => new RunTimeError({ cause })));
++var completePartialPrograms = () => import_effect18.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
++  const sortedInputs = (0, import_utils10.sortUTxOs)(config.collectedInputs, "Canonical");
+   const indicesMap = /* @__PURE__ */ new Map();
+   sortedInputs.forEach((value, index) => {
+     indicesMap.set(value.txHash + value.outputIndex, BigInt(index));
+@@ -1473,38 +1525,38 @@ var completePartialPrograms = (config) => import_effect17.Effect.gen(function* (
+         if (index !== void 0) return index;
+         else return [];
+       });
+-      if (import_effect17.Array.isEmptyArray(inputIndices) || inputIndices.length !== redeemerBuilder.inputs.length)
++      if (import_effect18.Array.isEmptyArray(inputIndices) || inputIndices.length !== redeemerBuilder.inputs.length)
+         yield* completeTxError(
+-          `RedeemerBuilder: Missing indices for inputs: ${(0, import_utils11.stringify)(redeemerBuilder.inputs)}`
++          `RedeemerBuilder: Missing indices for inputs: ${(0, import_utils10.stringify)(redeemerBuilder.inputs)}`
+         );
+       const redeemer = redeemerBuilder.makeRedeemer(inputIndices);
+       const program = partialProgram(redeemer);
+       newPrograms.push(program);
+     } else {
+-      const inputs = yield* (0, import_effect17.pipe)(
+-        import_effect17.Effect.fromNullable(redeemerBuilder.inputs),
+-        import_effect17.Effect.orElseFail(
++      const inputs = yield* (0, import_effect18.pipe)(
++        import_effect18.Effect.fromNullable(redeemerBuilder.inputs),
++        import_effect18.Effect.orElseFail(
+           () => completeTxError(
+-            `RedeemerBuilder: Inputs for redeemer builder not founds: ${(0, import_utils11.stringify)(redeemerBuilder)}`
++            `RedeemerBuilder: Inputs for redeemer builder not founds: ${(0, import_utils10.stringify)(redeemerBuilder)}`
+           )
+         )
+       );
+       for (const input of inputs) {
+-        const index = yield* (0, import_effect17.pipe)(
+-          import_effect17.Effect.fromNullable(
++        const index = yield* (0, import_effect18.pipe)(
++          import_effect18.Effect.fromNullable(
+             indicesMap.get(input.txHash + input.outputIndex)
+           ),
+-          import_effect17.Effect.orElseFail(
++          import_effect18.Effect.orElseFail(
+             () => completeTxError(`Index not found for input: ${input}`)
+           )
+         );
+         const redeemer = redeemerBuilder.makeRedeemer(index);
+-        const program = collectFromUTxO(config, [input], false)(redeemer);
++        const program = collectFromUTxO([input], false)(redeemer);
+         newPrograms.push(program);
+       }
+     }
+   }
+-  yield* import_effect17.Effect.all(newPrograms);
++  yield* import_effect18.Effect.all(newPrograms);
+ });
+ var applyUPLCEval = (uplcEval, txbuilder) => {
+   for (const bytes of uplcEval) {
+@@ -1527,7 +1579,7 @@ var applyUPLCEvalProvider = (evalRedeemerList, txbuilder) => {
+     );
+     txbuilder.set_exunits(
+       CML.RedeemerWitnessKey.new(
+-        (0, import_utils11.toCMLRedeemerTag)(evalRedeemer.redeemer_tag),
++        (0, import_utils10.toCMLRedeemerTag)(evalRedeemer.redeemer_tag),
+         BigInt(evalRedeemer.redeemer_index)
+       ),
+       exUnits
+@@ -1578,32 +1630,33 @@ var setRedeemerstoZero = (tx) => {
+   }
+   return tx;
+ };
+-var applyCollateral = (config, setCollateral, collateralInputs, changeAddress) => {
++var applyCollateral = (setCollateral, collateralInputs, changeAddress) => import_effect18.Effect.gen(function* () {
++  const { config } = yield* TxConfig;
+   for (const utxo of collateralInputs) {
+     const collateralInput = CML.SingleInputBuilder.from_transaction_unspent_output(
+-      (0, import_utils11.utxoToCore)(utxo)
++      (0, import_utils10.utxoToCore)(utxo)
+     ).payment_key();
+     config.txBuilder.add_collateral(collateralInput);
+   }
+-  const returnassets = (0, import_effect17.pipe)(
++  const returnassets = (0, import_effect18.pipe)(
+     sumAssetsFromInputs(collateralInputs),
+-    import_effect17.Record.union({ lovelace: -setCollateral }, import_effect17.BigInt.sum)
++    import_effect18.Record.union({ lovelace: -setCollateral }, import_effect18.BigInt.sum)
+   );
+   const collateralOutputBuilder = CML.TransactionOutputBuilder.new().with_address(
+     CML.Address.from_bech32(changeAddress)
+   );
+   config.txBuilder.set_collateral_return(
+-    collateralOutputBuilder.next().with_value((0, import_utils11.assetsToValue)(returnassets)).build().output()
++    collateralOutputBuilder.next().with_value((0, import_utils10.assetsToValue)(returnassets)).build().output()
+   );
+-};
+-var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => import_effect17.Effect.gen(function* () {
++});
++var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => import_effect18.Effect.gen(function* () {
+   const collateralLovelace = { lovelace: setCollateral };
+   const error = completeTxError(
+     `Your wallet does not have enough funds to cover the required ${setCollateral} Lovelace collateral. Or it contains UTxOs with reference scripts; which
+       are excluded from collateral selection.`
+   );
+   const { selected } = yield* recursive(
+-    (0, import_utils11.sortUTxOs)(inputs),
++    (0, import_utils10.sortUTxOs)(inputs, "Collateral"),
+     collateralLovelace,
+     coinsPerUtxoByte,
+     void 0,
+@@ -1612,11 +1665,11 @@ var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => import_effect1
+   );
+   if (selected.length > 3)
+     yield* completeTxError(
+-      `Selected ${selected.length} inputs as collateral, but max collateral inputs is 3 to cover the ${setCollateral} Lovelace collateral ${(0, import_utils11.stringify)(selected)}`
++      `Selected ${selected.length} inputs as collateral, but max collateral inputs is 3 to cover the ${setCollateral} Lovelace collateral ${(0, import_utils10.stringify)(selected)}`
+     );
+   return selected;
+ });
+-var doCoinSelection = (config, availableInputs, script_calculation, includeLeftoverLovelaceAsFee) => import_effect17.Effect.gen(function* () {
++var doCoinSelection = (config, availableInputs, script_calculation, includeLeftoverLovelaceAsFee) => import_effect18.Effect.gen(function* () {
+   const estimatedFee = {
+     lovelace: yield* estimateFee(config, script_calculation)
+   };
+@@ -1624,30 +1677,30 @@ var doCoinSelection = (config, availableInputs, script_calculation, includeLefto
+   const negatedCollectedAssets = negateAssets(
+     sumAssetsFromInputs(config.collectedInputs)
+   );
+-  const assetsDelta = (0, import_effect17.pipe)(
++  const assetsDelta = (0, import_effect18.pipe)(
+     config.totalOutputAssets,
+-    import_effect17.Record.union(estimatedFee, import_effect17.BigInt.sum),
+-    import_effect17.Record.union(negatedCollectedAssets, import_effect17.BigInt.sum),
+-    import_effect17.Record.union(negatedMintedAssets, import_effect17.BigInt.sum)
++    import_effect18.Record.union(estimatedFee, import_effect18.BigInt.sum),
++    import_effect18.Record.union(negatedCollectedAssets, import_effect18.BigInt.sum),
++    import_effect18.Record.union(negatedMintedAssets, import_effect18.BigInt.sum)
+   );
+-  let requiredAssets = (0, import_effect17.pipe)(
++  let requiredAssets = (0, import_effect18.pipe)(
+     assetsDelta,
+-    import_effect17.Record.filter((amount) => amount > 0n)
++    import_effect18.Record.filter((amount) => amount > 0n)
+   );
+-  const notRequiredAssets = (0, import_effect17.pipe)(
++  const notRequiredAssets = (0, import_effect18.pipe)(
+     assetsDelta,
+-    import_effect17.Record.filter((amount) => amount < 0n),
++    import_effect18.Record.filter((amount) => amount < 0n),
+     negateAssets
+   );
+   return yield* recursive(
+-    (0, import_utils11.sortUTxOs)(availableInputs),
++    (0, import_utils10.sortUTxOs)(availableInputs),
+     requiredAssets,
+     config.lucidConfig.protocolParameters.coinsPerUtxoByte,
+     notRequiredAssets,
+     includeLeftoverLovelaceAsFee
+   );
+ });
+-var estimateFee = (config, script_calculation) => import_effect17.Effect.gen(function* () {
++var estimateFee = (config, script_calculation) => import_effect18.Effect.gen(function* () {
+   const minFee = config.txBuilder.min_fee(script_calculation);
+   const refScriptFee = yield* calculateMinRefScriptFee(config);
+   let estimatedFee = minFee + refScriptFee;
+@@ -1658,10 +1711,16 @@ var estimateFee = (config, script_calculation) => import_effect17.Effect.gen(fun
+   }
+   return estimatedFee;
+ });
+-var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => import_effect17.Effect.gen(function* () {
++var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => import_effect18.Effect.gen(function* () {
+   const txEvaluation = setRedeemerstoZero(txRedeemerBuilder.draft_tx());
+-  const txUtxos = [...config.collectedInputs, ...config.readInputs];
+-  const uplc_eval = yield* import_effect17.Effect.tryPromise({
++  const txUtxos = [...config.collectedInputs, ...config.readInputs].map(
++    ({ datumHash, datum, ...rest }) => ({
++      ...rest,
++      datumHash,
++      datum: datumHash ? void 0 : datum
++    })
++  );
++  const uplc_eval = yield* import_effect18.Effect.tryPromise({
+     try: () => config.lucidConfig.provider.evaluateTx(
+       txEvaluation.to_cbor_hex(),
+       txUtxos
+@@ -1670,17 +1729,21 @@ var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => impor
+   });
+   return uplc_eval;
+ });
+-var evalTransaction = (config, txRedeemerBuilder, walletInputs) => import_effect17.Effect.gen(function* () {
++var evalTransaction = (config, txRedeemerBuilder, walletInputs) => import_effect18.Effect.gen(function* () {
+   const txEvaluation = setRedeemerstoZero(txRedeemerBuilder.draft_tx());
+   const txUtxos = [
+     ...walletInputs,
+     ...config.collectedInputs,
+     ...config.readInputs
+-  ];
+-  const ins = txUtxos.map((utxo) => (0, import_utils11.utxoToTransactionInput)(utxo));
+-  const outs = txUtxos.map((utxo) => (0, import_utils11.utxoToTransactionOutput)(utxo));
++  ].map(({ datumHash, datum, ...rest }) => ({
++    ...rest,
++    datumHash,
++    datum: datumHash ? void 0 : datum
++  }));
++  const ins = txUtxos.map((utxo) => (0, import_utils10.utxoToTransactionInput)(utxo));
++  const outs = txUtxos.map((utxo) => (0, import_utils10.utxoToTransactionOutput)(utxo));
+   const slotConfig = import_plutus4.SLOT_CONFIG_NETWORK[config.lucidConfig.network];
+-  const uplc_eval = yield* import_effect17.Effect.try({
++  const uplc_eval = yield* import_effect18.Effect.try({
+     try: () => UPLC.eval_phase_two_raw(
+       txEvaluation.to_cbor_bytes(),
+       ins.map((value) => value.to_cbor_bytes()),
+@@ -1693,7 +1756,7 @@ var evalTransaction = (config, txRedeemerBuilder, walletInputs) => import_effect
+       slotConfig.slotLength
+     ),
+     catch: (error) => completeTxError(
+-      JSON.stringify(error).replace(/\\n\s*/g, " ").trim()
++      `${(0, import_Predicate.isError)(error) ? error : JSON.stringify(error).replace(/\\n\s*/g, " ").trim()}`
+     )
+   });
+   return uplc_eval;
+@@ -1703,23 +1766,23 @@ var calculateMinLovelace = (coinsPerUtxoByte, multiAssets, changeAddress) => {
+   return CML.TransactionOutputBuilder.new().with_address(
+     CML.Address.from_bech32(changeAddress ? changeAddress : dummyAddress)
+   ).next().with_asset_and_min_required_coin(
+-    multiAssets ? (0, import_utils11.assetsToValue)(multiAssets).multi_asset() : CML.MultiAsset.new(),
++    multiAssets ? (0, import_utils10.assetsToValue)(multiAssets).multi_asset() : CML.MultiAsset.new(),
+     coinsPerUtxoByte
+   ).build().output().amount().coin();
+ };
+-var calculateMinRefScriptFee = (config) => import_effect17.Effect.gen(function* () {
++var calculateMinRefScriptFee = (config) => import_effect18.Effect.gen(function* () {
+   let fee = 0n;
+   let totalScriptSize = 0;
+-  config.readInputs.forEach((utxo) => {
++  for (const utxo of config.readInputs) {
+     if (utxo.scriptRef) {
+       totalScriptSize = totalScriptSize + utxo.scriptRef.script.length / 2;
+     }
+-  });
+-  config.collectedInputs.forEach((utxo) => {
++  }
++  for (const utxo of config.collectedInputs) {
+     if (utxo.scriptRef) {
+       totalScriptSize = totalScriptSize + utxo.scriptRef.script.length / 2;
+     }
+-  });
++  }
+   if (totalScriptSize === 0) return fee;
+   const fees = [15, 18, 21.6, 25.92, 31.1, 37.32, 44.79, 53.75];
+   let counter = 0;
+@@ -1745,74 +1808,74 @@ var deriveInputsFromTransaction = (tx) => {
+     const utxo = {
+       txHash,
+       outputIndex: index,
+-      ...(0, import_utils11.coreToTxOutput)(output)
++      ...(0, import_utils10.coreToTxOutput)(output)
+     };
+     utxos.push(utxo);
+   }
+   return utxos;
+ };
+-var negateAssets = (assets) => import_effect17.Record.map(assets, (amount) => -amount);
+-var sumAssetsFromInputs = (inputs) => import_effect17.Array.isEmptyArray(inputs) ? {} : inputs.map((utxo) => utxo.assets).reduce((acc, cur) => import_effect17.Record.union(acc, cur, import_effect17.BigInt.sum));
++var negateAssets = (assets) => import_effect18.Record.map(assets, (amount) => -amount);
++var sumAssetsFromInputs = (inputs) => import_effect18.Array.isEmptyArray(inputs) ? {} : inputs.map((utxo) => utxo.assets).reduce((acc, cur) => import_effect18.Record.union(acc, cur, import_effect18.BigInt.sum));
+ var calculateExtraLovelace = (leftoverAssets, coinsPerUtxoByte) => {
+-  return (0, import_effect17.pipe)(leftoverAssets, (assets) => {
++  return (0, import_effect18.pipe)(leftoverAssets, (assets) => {
+     const minLovelace = calculateMinLovelace(coinsPerUtxoByte, assets);
+     const currentLovelace = assets["lovelace"] || 0n;
+-    return currentLovelace >= minLovelace ? import_effect17.Option.none() : import_effect17.Option.some({ lovelace: minLovelace - currentLovelace });
++    return currentLovelace >= minLovelace ? import_effect18.Option.none() : import_effect18.Option.some({ lovelace: minLovelace - currentLovelace });
+   });
+ };
+-var recursive = (inputs, requiredAssets, coinsPerUtxoByte, externalAssets = {}, includeLeftoverLovelaceAsFee, error) => import_effect17.Effect.gen(function* () {
++var recursive = (inputs, requiredAssets, coinsPerUtxoByte, externalAssets = {}, includeLeftoverLovelaceAsFee, error) => import_effect18.Effect.gen(function* () {
+   let selected = [];
+   error ??= completeTxError(
+-    `Your wallet does not have enough funds to cover the required assets: ${(0, import_utils11.stringify)(requiredAssets)}
++    `Your wallet does not have enough funds to cover the required assets: ${(0, import_utils10.stringify)(requiredAssets)}
+       Or it contains UTxOs with reference scripts; which are excluded from coin selection.`
+   );
+-  if (!import_effect17.Record.isEmptyRecord(requiredAssets)) {
+-    selected = (0, import_utils11.selectUTxOs)(inputs, requiredAssets);
+-    if (import_effect17.Array.isEmptyArray(selected)) yield* error;
++  if (!import_effect18.Record.isEmptyRecord(requiredAssets)) {
++    selected = (0, import_utils10.selectUTxOs)(inputs, requiredAssets);
++    if (import_effect18.Array.isEmptyArray(selected)) yield* error;
+   }
+   const selectedAssets = sumAssetsFromInputs(selected);
+-  let availableAssets = (0, import_effect17.pipe)(
++  let availableAssets = (0, import_effect18.pipe)(
+     selectedAssets,
+-    import_effect17.Record.union(requiredAssets, (self, that) => self - that),
+-    import_effect17.Record.union(externalAssets, import_effect17.BigInt.sum)
++    import_effect18.Record.union(requiredAssets, (self, that) => self - that),
++    import_effect18.Record.union(externalAssets, import_effect18.BigInt.sum)
+   );
+-  let extraLovelace = (0, import_effect17.pipe)(
++  let extraLovelace = (0, import_effect18.pipe)(
+     calculateExtraLovelace(availableAssets, coinsPerUtxoByte),
+-    import_effect17.Option.getOrUndefined
++    import_effect18.Option.getOrUndefined
+   );
+   let remainingInputs = inputs;
+   while (extraLovelace) {
+-    remainingInputs = import_effect17.Array.differenceWith(import_utils11.isEqualUTxO)(
++    remainingInputs = import_effect18.Array.differenceWith(import_utils10.isEqualUTxO)(
+       remainingInputs,
+       selected
+     );
+-    const extraSelected = (0, import_utils11.selectUTxOs)(remainingInputs, extraLovelace);
+-    if (import_effect17.Array.isEmptyArray(extraSelected)) {
++    const extraSelected = (0, import_utils10.selectUTxOs)(remainingInputs, extraLovelace);
++    if (import_effect18.Array.isEmptyArray(extraSelected)) {
+       if (includeLeftoverLovelaceAsFee)
+         return { selected: [...selected], burnable: extraLovelace };
+       yield* completeTxError(
+-        `Your wallet does not have enough funds to cover required minimum ADA for change output: ${(0, import_utils11.stringify)(extraLovelace)}
++        `Your wallet does not have enough funds to cover required minimum ADA for change output: ${(0, import_utils10.stringify)(extraLovelace)}
+           Or it contains UTxOs with reference scripts; which are excluded from coin selection.`
+       );
+     }
+     const extraSelectedAssets = sumAssetsFromInputs(extraSelected);
+     selected = [...selected, ...extraSelected];
+-    availableAssets = import_effect17.Record.union(
++    availableAssets = import_effect18.Record.union(
+       availableAssets,
+       extraSelectedAssets,
+-      import_effect17.BigInt.sum
++      import_effect18.BigInt.sum
+     );
+-    extraLovelace = (0, import_effect17.pipe)(
++    extraLovelace = (0, import_effect18.pipe)(
+       calculateExtraLovelace(availableAssets, coinsPerUtxoByte),
+-      import_effect17.Option.getOrUndefined
++      import_effect18.Option.getOrUndefined
+     );
+   }
+   return { selected, burnable: { lovelace: 0n } };
+ });
+ 
+ // src/tx-builder/TxBuilder.ts
+-var import_effect18 = require("effect");
+-var import_utils12 = require("@lucid-evolution/utils");
++var import_effect19 = require("effect");
++var import_utils11 = require("@lucid-evolution/utils");
+ function makeTxBuilder(lucidConfig) {
+   const config = {
+     lucidConfig,
+@@ -1829,6 +1892,7 @@ function makeTxBuilder(lucidConfig) {
+     partialPrograms: /* @__PURE__ */ new Map(),
+     minFee: void 0
+   };
++  const configLayer = import_effect19.Layer.succeed(TxConfig, { config });
+   const txBuilder = {
+     readFrom: (utxos) => {
+       utxos.map((utxo) => {
+@@ -1837,24 +1901,23 @@ function makeTxBuilder(lucidConfig) {
+           config.scripts.set(scriptKeyValue.key, scriptKeyValue.value);
+         }
+       });
+-      const program = readFrom(config, utxos);
++      const program = readFrom(utxos);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     collectFrom: (utxos, redeemer) => {
+-      const program = typeof redeemer === "object" ? collectFromUTxOPartial(config, utxos, redeemer) : collectFromUTxO(config, utxos)(redeemer);
++      const program = typeof redeemer === "object" ? collectFromUTxOPartial(utxos, redeemer) : collectFromUTxO(utxos)(redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     pay: {
+       ToAddress: (address, assets) => {
+-        const program = payToAddress(config, address, assets);
++        const program = payToAddress(address, assets);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       ToAddressWithData: (address, outputDatum, assets, scriptRef) => {
+-        const program = payToAddressWithData(
+-          config,
++        const program = ToAddressWithData(
+           address,
+           outputDatum,
+           assets,
+@@ -1864,41 +1927,34 @@ function makeTxBuilder(lucidConfig) {
+         return txBuilder;
+       },
+       ToContract: (address, outputDatum, assets, scriptRef) => {
+-        const program = payToContract(
+-          config,
+-          address,
+-          outputDatum,
+-          assets,
+-          scriptRef
+-        );
++        const program = ToContract(address, outputDatum, assets, scriptRef);
+         config.programs.push(program);
+         return txBuilder;
+       }
+     },
+     addSigner: (address) => {
+-      const program = addSigner(config, address);
++      const program = addSigner(address);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     addSignerKey: (keyHash) => {
+-      const program = addSignerKey(config, keyHash);
++      const program = addSignerKey(keyHash);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     registerStake: (rewardAddress) => {
+-      const program = registerStake(config, rewardAddress);
++      const program = registerStake(rewardAddress);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     register: {
+       Stake: (rewardAddress) => {
+-        const program = registerStake(config, rewardAddress);
++        const program = registerStake(rewardAddress);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       DRep: (rewardAddress, anchor, redeemer) => {
+         const program = registerDRep(
+-          config,
+           rewardAddress,
+           anchor,
+           redeemer
+@@ -1908,66 +1964,56 @@ function makeTxBuilder(lucidConfig) {
+       }
+     },
+     deRegisterStake: (rewardAddress, redeemer) => {
+-      const program = deRegisterStake(config, rewardAddress, redeemer);
++      const program = deRegisterStake(rewardAddress, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     deregister: {
+       Stake: (rewardAddress, redeemer) => {
+-        const program = deRegisterStake(config, rewardAddress, redeemer);
++        const program = deRegisterStake(rewardAddress, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       DRep: (rewardAddress, redeemer) => {
+-        const program = deregisterDRep(
+-          config,
+-          rewardAddress,
+-          redeemer
+-        );
++        const program = deregisterDRep(rewardAddress, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       }
+     },
+     withdraw: (rewardAddress, amount, redeemer) => {
+-      const partialProgram = withdraw(config, rewardAddress, amount);
++      const partialProgram = withdraw(rewardAddress, amount);
+       handleRedeemerBuilder(config, partialProgram, redeemer);
+       return txBuilder;
+     },
+     mintAssets: (assets, redeemer) => {
+-      config.mintedAssets = (0, import_utils12.addAssets)(config.mintedAssets, assets);
+-      const partialProgram = mintAssets(config, assets);
++      config.mintedAssets = (0, import_utils11.addAssets)(config.mintedAssets, assets);
++      const partialProgram = mintAssets(assets);
+       handleRedeemerBuilder(config, partialProgram, redeemer);
+       return txBuilder;
+     },
+     validFrom: (unixTime) => {
+-      const program = validFrom(config, unixTime);
++      const program = validFrom(unixTime);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     validTo: (unixTime) => {
+-      const program = validTo(config, unixTime);
++      const program = validTo(unixTime);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     delegateTo: (rewardAddress, poolId, redeemer) => {
+-      const program = delegateTo(config, rewardAddress, poolId, redeemer);
++      const program = delegateTo(rewardAddress, poolId, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     delegate: {
+       ToPool: (rewardAddress, poolId, redeemer) => {
+-        const program = delegateTo(
+-          config,
+-          rewardAddress,
+-          poolId,
+-          redeemer
+-        );
++        const program = delegateTo(rewardAddress, poolId, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       VoteToDRep: (rewardAddress, drep, redeemer) => {
+         const program = delegateVoteToDRep(
+-          config,
+           rewardAddress,
+           drep,
+           redeemer
+@@ -1977,7 +2023,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       VoteToPoolAndDRep: (rewardAddress, poolId, drep, redeemer) => {
+         const program = delegateVoteToPoolAndDRep(
+-          config,
+           rewardAddress,
+           poolId,
+           drep,
+@@ -1990,7 +2035,6 @@ function makeTxBuilder(lucidConfig) {
+     registerAndDelegate: {
+       ToPool: (rewardAddress, poolId, redeemer) => {
+         const program = registerAndDelegateToPool(
+-          config,
+           rewardAddress,
+           poolId,
+           redeemer
+@@ -2000,7 +2044,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       ToDRep: (rewardAddress, drep, redeemer) => {
+         const program = registerAndDelegateToDRep(
+-          config,
+           rewardAddress,
+           drep,
+           redeemer
+@@ -2010,7 +2053,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       ToPoolAndDRep: (rewardAddress, poolId, drep, redeemer) => {
+         const program = registerAndDelegateToPoolAndDRep(
+-          config,
+           rewardAddress,
+           poolId,
+           drep,
+@@ -2021,18 +2063,12 @@ function makeTxBuilder(lucidConfig) {
+       }
+     },
+     updateDRep: (rewardAddress, anchor, redeemer) => {
+-      const program = updateDRep(
+-        config,
+-        rewardAddress,
+-        anchor,
+-        redeemer
+-      );
++      const program = updateDRep(rewardAddress, anchor, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     authCommitteeHot: (coldAddress, hotAddress, redeemer) => {
+       const program = authCommitteeHot(
+-        config,
+         coldAddress,
+         hotAddress,
+         redeemer
+@@ -2042,7 +2078,6 @@ function makeTxBuilder(lucidConfig) {
+     },
+     resignCommitteeHot: (coldAddress, anchor, redeemer) => {
+       const program = resignCommitteeHot(
+-        config,
+         coldAddress,
+         anchor,
+         redeemer
+@@ -2094,11 +2129,9 @@ function makeTxBuilder(lucidConfig) {
+     },
+     compose: (tx) => {
+       if (tx) {
+-        const program = import_effect18.Effect.gen(function* () {
+-          const config2 = yield* import_effect18.Effect.promise(() => tx.config());
+-          yield* import_effect18.Effect.all(config2.programs, { concurrency: "unbounded" });
+-        });
+-        config.programs.push(program);
++        const rawConfig = tx.rawConfig();
++        config.programs = [...config.programs, ...tx.getPrograms()];
++        config.scripts = new Map([...config.scripts, ...rawConfig.scripts]);
+       }
+       return txBuilder;
+     },
+@@ -2107,26 +2140,42 @@ function makeTxBuilder(lucidConfig) {
+       return txBuilder;
+     },
+     complete: (options) => makeReturn(
+-      complete(config, options).pipe(
+-        import_effect18.Effect.map((result) => result[2])
++      (0, import_effect19.pipe)(
++        complete(options),
++        import_effect19.Effect.provide(configLayer),
++        import_effect19.Effect.map((result) => result[2])
+       )
+     ).unsafeRun(),
+-    completeProgram: (options) => complete(config, options).pipe(
+-      import_effect18.Effect.map((result) => result[2])
++    completeProgram: (options) => (0, import_effect19.pipe)(
++      complete(options),
++      import_effect19.Effect.provide(configLayer),
++      import_effect19.Effect.map((result) => result[2])
+     ),
+     completeSafe: (options) => makeReturn(
+-      complete(config, options).pipe(
+-        import_effect18.Effect.map((result) => result[2])
++      (0, import_effect19.pipe)(
++        complete(options),
++        import_effect19.Effect.provide(configLayer),
++        import_effect19.Effect.map((result) => result[2])
+       )
+     ).safeRun(),
+-    chainProgram: (options) => complete(config, options),
+-    chain: (options) => makeReturn(complete(config, options)).unsafeRun(),
+-    chainSafe: (options) => makeReturn(complete(config, options)).safeRun(),
+-    config: () => import_effect18.Effect.gen(function* () {
+-      yield* import_effect18.Effect.all(config.programs);
+-      return config;
+-    }).pipe(import_effect18.Effect.runPromise),
+-    lucidConfig: () => config.lucidConfig
++    chainProgram: (options) => (0, import_effect19.pipe)(complete(options), import_effect19.Effect.provide(configLayer)),
++    chain: (options) => makeReturn(
++      (0, import_effect19.pipe)(complete(options), import_effect19.Effect.provide(configLayer))
++    ).unsafeRun(),
++    chainSafe: (options) => makeReturn(
++      (0, import_effect19.pipe)(complete(options), import_effect19.Effect.provide(configLayer))
++    ).safeRun(),
++    rawConfig: () => config,
++    config: () => (0, import_effect19.pipe)(
++      import_effect19.Effect.gen(function* () {
++        yield* import_effect19.Effect.all(config.programs);
++        return config;
++      }),
++      import_effect19.Effect.provide(configLayer),
++      import_effect19.Effect.runPromise
++    ),
++    lucidConfig: () => config.lucidConfig,
++    getPrograms: () => config.programs
+   };
+   return txBuilder;
+ }
+@@ -2156,24 +2205,37 @@ var makeTxConfig = (protocolParameters, costModels) => {
+ // src/lucid-evolution/LucidEvolution.ts
+ var import_plutus5 = require("@lucid-evolution/plutus");
+ var import_wallet = require("@lucid-evolution/wallet");
++var import_effect20 = require("effect");
+ var Lucid = async (provider, network, options = {}) => {
+-  const protocolParameters = options.presetProtocolParameters || await provider.getProtocolParameters();
+-  const costModels = (0, import_utils14.createCostModels)(protocolParameters.costModels);
++  const protocolParameters = options.presetProtocolParameters || await provider?.getProtocolParameters();
++  const costModels = protocolParameters ? (0, import_utils13.createCostModels)(protocolParameters.costModels) : void 0;
+   const config = {
+     provider,
+     network,
+     wallet: void 0,
+     costModels,
+-    txbuilderconfig: makeTxConfig(protocolParameters, costModels),
++    txbuilderconfig: protocolParameters && costModels ? makeTxConfig(protocolParameters, costModels) : void 0,
+     protocolParameters
+   };
+-  if ("slot" in config.provider) {
++  if (config.provider && "slot" in config.provider) {
+     const emulator = config.provider;
+-    import_plutus5.SLOT_CONFIG_NETWORK[network] = {
+-      zeroTime: emulator.now(),
+-      zeroSlot: 0,
+-      slotLength: 1e3
+-    };
++    import_effect20.Effect.gen(function* () {
++      const custom = yield* (0, import_effect20.pipe)(
++        validateNotNullableNetwork(network)
++        // Effect.filterOrFail(
++        //   (network) => network === "Custom",
++        //   () =>
++        //     new UnauthorizedNetwork({
++        //       message: `Expected Custom, received ${String(network)}`,
++        //     }),
++        // ),
++      );
++      import_plutus5.SLOT_CONFIG_NETWORK[custom] = {
++        zeroTime: emulator.now(),
++        zeroSlot: 0,
++        slotLength: 1e3
++      };
++    }).pipe(import_effect20.Effect.runSync);
+   }
+   return {
+     config: () => config,
+@@ -2181,58 +2243,147 @@ var Lucid = async (provider, network, options = {}) => {
+     overrideUTxOs: (utxos) => config.wallet?.overrideUTxOs(utxos),
+     switchProvider: async (provider2) => {
+       const protocolParam = await provider2.getProtocolParameters();
+-      const costModels2 = (0, import_utils14.createCostModels)(protocolParam.costModels);
++      const costModels2 = (0, import_utils13.createCostModels)(protocolParam.costModels);
+       config.provider = provider2;
+       config.costModels = costModels2;
+       config.txbuilderconfig = makeTxConfig(protocolParam, costModels2);
+       config.protocolParameters = protocolParam;
+     },
+-    newTx: () => makeTxBuilder(config),
++    newTx: () => import_effect20.Effect.gen(function* () {
++      const provider2 = yield* import_effect20.Effect.fromNullable(config.provider);
++      const network2 = yield* import_effect20.Effect.fromNullable(config.network);
++      const costModels2 = yield* validateNotNullable(
++        config.costModels,
++        "CostModels are not set in Lucid instance"
++      );
++      const txbuilderconfig = yield* validateNotNullable(
++        config.txbuilderconfig,
++        "txbuilderconfig is not set in Lucid instance"
++      );
++      const protocolParameters2 = yield* validateNotNullable(
++        config.protocolParameters,
++        "protocolParameters are not set in Lucid instance"
++      );
++      return makeTxBuilder({
++        provider: provider2,
++        network: network2,
++        wallet: config.wallet,
++        costModels: costModels2,
++        txbuilderconfig,
++        protocolParameters: protocolParameters2
++      });
++    }).pipe(import_effect20.Effect.runSync),
+     fromTx: (tx) => makeTxSignBuilder(
+-      config,
++      config.wallet,
+       CML.Transaction.from_cbor_hex(tx)
+     ),
+     selectWallet: {
+-      fromSeed: (seed, options2) => {
++      fromSeed: (seed, options2) => import_effect20.Effect.gen(function* () {
+         config.wallet = (0, import_wallet.makeWalletFromSeed)(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           seed,
+           options2
+         );
+-      },
+-      fromPrivateKey: (privateKey) => {
++      }).pipe(import_effect20.Effect.runSync),
++      fromPrivateKey: (privateKey) => import_effect20.Effect.gen(function* () {
+         config.wallet = (0, import_wallet.makeWalletFromPrivateKey)(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           privateKey
+         );
+-      },
+-      fromAPI: (walletAPI) => {
+-        config.wallet = (0, import_wallet.makeWalletFromAPI)(config.provider, walletAPI);
+-      },
+-      fromAddress: (address, utxos) => {
++      }).pipe(import_effect20.Effect.runSync),
++      fromAPI: (walletAPI) => import_effect20.Effect.gen(function* () {
++        config.wallet = (0, import_wallet.makeWalletFromAPI)(
++          yield* validateNotNullableProvider(config.provider),
++          walletAPI
++        );
++      }).pipe(import_effect20.Effect.runSync),
++      fromAddress: (address, utxos) => import_effect20.Effect.gen(function* () {
+         config.wallet = (0, import_wallet.makeWalletFromAddress)(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           address,
+           utxos
+         );
+-      }
+-    },
+-    currentSlot: () => {
+-      return (0, import_utils14.unixTimeToSlot)(config.network, Date.now());
++      }).pipe(import_effect20.Effect.runSync)
+     },
+-    utxosAt: (addressOrCredential) => config.provider.getUtxos(addressOrCredential),
+-    utxosAtWithUnit: (addressOrCredential, unit) => config.provider.getUtxosWithUnit(addressOrCredential, unit),
+-    utxoByUnit: (unit) => config.provider.getUtxoByUnit(unit),
+-    utxosByOutRef: (outRefs) => config.provider.getUtxosByOutRef(outRefs),
+-    delegationAt: config.provider.getDelegation,
+-    awaitTx: (txHash, checkInterval) => config.provider.awaitTx(txHash, checkInterval),
+-    datumOf: (utxo, type) => datumOf(config.provider, utxo, type),
+-    metadataOf: (unit) => metadataOf(config.provider, unit)
++    currentSlot: () => (0, import_effect20.pipe)(
++      validateNotNullableNetwork(config.network),
++      import_effect20.Effect.map((network2) => (0, import_utils13.unixTimeToSlot)(network2, Date.now())),
++      import_effect20.Effect.runSync
++    ),
++    unixTimeToSlot: (unixTime) => (0, import_effect20.pipe)(
++      validateNotNullableNetwork(config.network),
++      import_effect20.Effect.map((network2) => (0, import_utils13.unixTimeToSlot)(network2, unixTime)),
++      import_effect20.Effect.runSync
++    ),
++    utxosAt: (addressOrCredential) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => provider2.getUtxos(addressOrCredential))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    utxosAtWithUnit: (addressOrCredential, unit) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(
++          () => provider2.getUtxosWithUnit(addressOrCredential, unit)
++        )
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    utxoByUnit: (unit) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => provider2.getUtxoByUnit(unit))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    utxosByOutRef: (outRefs) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => provider2.getUtxosByOutRef(outRefs))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    delegationAt: (rewardAddress) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => provider2.getDelegation(rewardAddress))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    awaitTx: (txHash, checkInterval) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => provider2.awaitTx(txHash, checkInterval))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    datumOf: (utxo, type) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => datumOf(provider2, utxo, type))
++      ),
++      import_effect20.Effect.runPromise
++    ),
++    metadataOf: (unit) => (0, import_effect20.pipe)(
++      validateNotNullableProvider(config.provider),
++      import_effect20.Effect.flatMap(
++        (provider2) => import_effect20.Effect.promise(() => metadataOf(provider2, unit))
++      ),
++      import_effect20.Effect.runPromise
++    )
+   };
+ };
++var validateNotNullable = (value, message) => (0, import_effect20.pipe)(
++  import_effect20.Effect.fromNullable(value),
++  import_effect20.Effect.orElseFail(() => new NullableError({ message }))
++);
++var validateNotNullableNetwork = (network) => validateNotNullable(network, "Network is not set in Lucid instance");
++var validateNotNullableProvider = (provider) => validateNotNullable(provider, "Provider is not set in Lucid instance");
+ 
+ // src/index.ts
+ __reExport(src_exports, require("@lucid-evolution/core-types"), module.exports);
+@@ -2247,10 +2398,12 @@ __reExport(src_exports, require("@lucid-evolution/wallet"), module.exports);
+   CML,
+   ERROR_MESSAGE,
+   Lucid,
++  NullableError,
+   RunTimeError,
+   TxBuilderError,
+   TxSignerError,
+   TxSubmitError,
++  UnauthorizedNetwork,
+   makeReturn,
+   makeSubmit,
+   makeTxBuilder,
+diff --git a/node_modules/@lucid-evolution/lucid/dist/index.d.cts b/node_modules/@lucid-evolution/lucid/dist/index.d.cts
+index 24a4b63..35b2729 100644
+--- a/node_modules/@lucid-evolution/lucid/dist/index.d.cts
++++ b/node_modules/@lucid-evolution/lucid/dist/index.d.cts
+@@ -1,10 +1,10 @@
+-import { Network, Wallet, PrivateKey, TransactionWitnesses, Address, UTxO, Assets, TxOutput, ScriptType, RedeemerBuilder, Script, RewardAddress, PaymentKeyHash, StakeKeyHash, Lovelace, Anchor, PoolId, Redeemer, DRep, Label, Provider, Transaction, WalletApi, Credential, OutRef, Delegation, ProtocolParameters } from '@lucid-evolution/core-types';
++import { Network, Wallet, PrivateKey, TransactionWitnesses, Address, UTxO, Assets, TxOutput, ScriptType, RedeemerBuilder, Script, RewardAddress, PaymentKeyHash, StakeKeyHash, Lovelace, Anchor, PoolId, Redeemer, DRep, Label, Provider, Transaction, WalletApi, UnixTime, Credential, OutRef, Delegation, ProtocolParameters } from '@lucid-evolution/core-types';
+ export * from '@lucid-evolution/core-types';
+ import * as CML from '@anastasia-labs/cardano-multiplatform-lib-nodejs';
+ export { CML };
+ import * as effect_Either from 'effect/Either';
+ import { Either } from 'effect/Either';
+-import { Effect } from 'effect';
++import { Effect, Context } from 'effect';
+ import * as effect_Cause from 'effect/Cause';
+ import * as effect_Types from 'effect/Types';
+ import { Data } from '@lucid-evolution/plutus';
+@@ -56,6 +56,20 @@ declare const ERROR_MESSAGE: {
+     readonly MISSING_SCRIPT: (hash: string) => string;
+     readonly MISSING_POLICY: (policyId: string) => string;
+ };
++declare const NullableError_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
++    readonly _tag: "NullableError";
++} & Readonly<A>;
++declare class NullableError extends NullableError_base<{
++    readonly message: string;
++}> {
++}
++declare const UnauthorizedNetwork_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
++    readonly _tag: "UnauthorizedNetwork";
++} & Readonly<A>;
++declare class UnauthorizedNetwork extends UnauthorizedNetwork_base<{
++    readonly message: string;
++}> {
++}
+ declare const TxBuilderError_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
+     readonly _tag: "TxBuilderError";
+ } & Readonly<A>;
+@@ -177,7 +191,7 @@ interface TxSignBuilderConfig {
+     txComplete: CML.Transaction;
+     witnessSetBuilder: CML.TransactionWitnessSetBuilder;
+     programs: Effect.Effect<void, TransactionSignError, never>[];
+-    lucidConfig: LucidConfig;
++    wallet: Wallet | undefined;
+     fee: number;
+     exUnits: {
+         cpu: number;
+@@ -237,7 +251,13 @@ interface TxSignBuilder {
+     /** Safely completes the transaction. */
+     completeSafe: () => Promise<Either<TxSigned, TransactionSignError>>;
+ }
+-declare const makeTxSignBuilder: (lucidConfig: LucidConfig, tx: CML.Transaction) => TxSignBuilder;
++declare const makeTxSignBuilder: (wallet: Wallet | undefined, tx: CML.Transaction) => TxSignBuilder;
++
++declare const TxConfig_base: Context.TagClass<TxConfig, "TxConfig", {
++    readonly config: TxBuilderConfig;
++}>;
++declare class TxConfig extends TxConfig_base {
++}
+ 
+ type CompleteOptions = {
+     /**
+@@ -295,8 +315,8 @@ type TxBuilderConfig = {
+         type: ScriptType;
+         script: string;
+     }>;
+-    programs: Effect.Effect<void, TransactionError, never>[];
+-    partialPrograms: Map<RedeemerBuilder, (redeemer?: string) => Effect.Effect<void, TransactionError, never>>;
++    programs: Effect.Effect<void, TransactionError, TxConfig>[];
++    partialPrograms: Map<RedeemerBuilder, (redeemer?: string) => Effect.Effect<void, TransactionError, TxConfig>>;
+     minFee: bigint | undefined;
+ };
+ type TxBuilder = {
+@@ -304,8 +324,60 @@ type TxBuilder = {
+     collectFrom: (utxos: UTxO[], redeemer?: string | RedeemerBuilder) => TxBuilder;
+     pay: {
+         ToAddress: (address: string, assets: Assets) => TxBuilder;
+-        ToAddressWithData: (address: string, outputDatum: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
+-        ToContract: (address: string, outputDatum: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
++        /**
++         * Creates an output that lock funds to a target address, with optional parameters for attaching a datum, assets, and a reference script.
++         *
++         * **Warning:** When working with Plutus V1 or V2 contracts, omitting the `outputDatum` can result in a permanently locked UTXO.
++         *
++         * @example
++         * ```ts
++         * const refScript: Script = {
++         *   type: "PlutusV3",
++         *   script: "450100002499",
++         *  };
++         *
++         * const signBuilder = await user
++         *   .newTx()
++         *   .pay.ToAddressWithData(
++         *     "addr1q98wl3hnya9l94rt58ky533deyqe9t8zz5n9su26k8e5g23yar4q0adtaax9q9g0kphpv2ws7vxqwu6ln6pqx7j29nfqsfy9mg",
++         *     {
++         *       kind: "inline",
++         *       value: "d8799f44deadbeefff",
++         *     },
++         *     { lovelace: 10_000_000n },
++         *     refScript
++         *   )
++         *   .complete();
++         * ```
++         */
++        ToAddressWithData: (address: string, outputDatum?: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
++        /**
++         * Creates an output that lock funds to a target address, with optional parameters for attaching a datum, assets, and a reference script.
++         *
++         * **Warning:** When working with Plutus V1 or V2 contracts, omitting the `outputDatum` can result in a permanently locked UTXO.
++         *
++         * @example
++         * ```ts
++         * const refScript: Script = {
++         *   type: "PlutusV3",
++         *   script: "450100002499",
++         *  };
++         *
++         * const signBuilder = await user
++         *   .newTx()
++         *   .pay.ToContract(
++         *     "addr1q98wl3hnya9l94rt58ky533deyqe9t8zz5n9su26k8e5g23yar4q0adtaax9q9g0kphpv2ws7vxqwu6ln6pqx7j29nfqsfy9mg",
++         *     {
++         *       kind: "inline",
++         *       value: "d8799f44deadbeefff",
++         *     },
++         *     { lovelace: 10_000_000n },
++         *     refScript
++         *   )
++         *   .complete();
++         * ```
++         */
++        ToContract: (address: string, outputDatum?: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
+     };
+     addSigner: (address: Address | RewardAddress) => TxBuilder;
+     addSignerKey: (keyHash: PaymentKeyHash | StakeKeyHash) => TxBuilder;
+@@ -361,13 +433,13 @@ type TxBuilder = {
+     complete: (options?: CompleteOptions) => Promise<TxSignBuilder>;
+     completeProgram: (options?: CompleteOptions) => Effect.Effect<TxSignBuilder, TransactionError>;
+     completeSafe: (options?: CompleteOptions) => Promise<Either<TxSignBuilder, TransactionError>>;
+-    chainProgram: () => Effect.Effect<[
++    chainProgram: (options?: CompleteOptions) => Effect.Effect<[
+         UTxO[],
+         UTxO[],
+         TxSignBuilder
+     ], TransactionError, never>;
+-    chain: () => Promise<[UTxO[], UTxO[], TxSignBuilder]>;
+-    chainSafe: () => Promise<Either<[UTxO[], UTxO[], TxSignBuilder], TransactionError>>;
++    chain: (options?: CompleteOptions) => Promise<[UTxO[], UTxO[], TxSignBuilder]>;
++    chainSafe: (options?: CompleteOptions) => Promise<Either<[UTxO[], UTxO[], TxSignBuilder], TransactionError>>;
+     /**
+      * **Warning:** This method executes all programs and mutates the TxBuilder state.
+      *
+@@ -376,15 +448,23 @@ type TxBuilder = {
+      * It is recommended to call `.config()` only for debugging purposes
+      */
+     config: () => Promise<TxBuilderConfig>;
++    /**
++     * Returns the raw TxBuilderConfig
++     */
++    rawConfig: () => TxBuilderConfig;
+     /**
+      * Returns the current lucid instance configuration
+      */
+     lucidConfig: () => LucidConfig;
++    /**
++     * Returns the current txbuilder programs
++     */
++    getPrograms: () => Effect.Effect<void, TransactionError, TxConfig>[];
+ };
+ declare function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder;
+ 
+ type LucidEvolution = {
+-    config: () => LucidConfig;
++    config: () => Partial<LucidConfig>;
+     wallet: () => Wallet;
+     overrideUTxOs: (utxos: UTxO[]) => void;
+     switchProvider: (provider: Provider) => Promise<void>;
+@@ -401,6 +481,7 @@ type LucidEvolution = {
+         fromAddress: (address: string, utxos: UTxO[]) => void;
+     };
+     currentSlot: () => number;
++    unixTimeToSlot: (unixTime: UnixTime) => number;
+     utxosAt: (addressOrCredential: string | Credential) => Promise<UTxO[]>;
+     utxosAtWithUnit: (addressOrCredential: string | Credential, unit: string) => Promise<UTxO[]>;
+     utxoByUnit: (unit: string) => Promise<UTxO>;
+@@ -425,6 +506,6 @@ type LucidOptions = {
+      */
+     presetProtocolParameters?: ProtocolParameters;
+ };
+-declare const Lucid: (provider: Provider, network: Network, options?: LucidOptions) => Promise<LucidEvolution>;
++declare const Lucid: (provider?: Provider | undefined, network?: Network, options?: LucidOptions) => Promise<LucidEvolution>;
+ 
+-export { type CBORHex, ERROR_MESSAGE, type Hash, Lucid, type LucidConfig, type LucidEvolution, type OutputDatum, RunTimeError, type TransactionError, type TransactionSignError, type TxBuilder, type TxBuilderConfig, TxBuilderError, type TxSignBuilder, type TxSignBuilderConfig, type TxSigned, TxSignerError, TxSubmitError, makeReturn, makeSubmit, makeTxBuilder, makeTxSignBuilder };
++export { type CBORHex, ERROR_MESSAGE, type Hash, Lucid, type LucidConfig, type LucidEvolution, NullableError, type OutputDatum, RunTimeError, type TransactionError, type TransactionSignError, type TxBuilder, type TxBuilderConfig, TxBuilderError, type TxSignBuilder, type TxSignBuilderConfig, type TxSigned, TxSignerError, TxSubmitError, UnauthorizedNetwork, makeReturn, makeSubmit, makeTxBuilder, makeTxSignBuilder };
+diff --git a/node_modules/@lucid-evolution/lucid/dist/index.d.ts b/node_modules/@lucid-evolution/lucid/dist/index.d.ts
+index 24a4b63..35b2729 100644
+--- a/node_modules/@lucid-evolution/lucid/dist/index.d.ts
++++ b/node_modules/@lucid-evolution/lucid/dist/index.d.ts
+@@ -1,10 +1,10 @@
+-import { Network, Wallet, PrivateKey, TransactionWitnesses, Address, UTxO, Assets, TxOutput, ScriptType, RedeemerBuilder, Script, RewardAddress, PaymentKeyHash, StakeKeyHash, Lovelace, Anchor, PoolId, Redeemer, DRep, Label, Provider, Transaction, WalletApi, Credential, OutRef, Delegation, ProtocolParameters } from '@lucid-evolution/core-types';
++import { Network, Wallet, PrivateKey, TransactionWitnesses, Address, UTxO, Assets, TxOutput, ScriptType, RedeemerBuilder, Script, RewardAddress, PaymentKeyHash, StakeKeyHash, Lovelace, Anchor, PoolId, Redeemer, DRep, Label, Provider, Transaction, WalletApi, UnixTime, Credential, OutRef, Delegation, ProtocolParameters } from '@lucid-evolution/core-types';
+ export * from '@lucid-evolution/core-types';
+ import * as CML from '@anastasia-labs/cardano-multiplatform-lib-nodejs';
+ export { CML };
+ import * as effect_Either from 'effect/Either';
+ import { Either } from 'effect/Either';
+-import { Effect } from 'effect';
++import { Effect, Context } from 'effect';
+ import * as effect_Cause from 'effect/Cause';
+ import * as effect_Types from 'effect/Types';
+ import { Data } from '@lucid-evolution/plutus';
+@@ -56,6 +56,20 @@ declare const ERROR_MESSAGE: {
+     readonly MISSING_SCRIPT: (hash: string) => string;
+     readonly MISSING_POLICY: (policyId: string) => string;
+ };
++declare const NullableError_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
++    readonly _tag: "NullableError";
++} & Readonly<A>;
++declare class NullableError extends NullableError_base<{
++    readonly message: string;
++}> {
++}
++declare const UnauthorizedNetwork_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
++    readonly _tag: "UnauthorizedNetwork";
++} & Readonly<A>;
++declare class UnauthorizedNetwork extends UnauthorizedNetwork_base<{
++    readonly message: string;
++}> {
++}
+ declare const TxBuilderError_base: new <A extends Record<string, any> = {}>(args: effect_Types.Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => effect_Cause.YieldableError & {
+     readonly _tag: "TxBuilderError";
+ } & Readonly<A>;
+@@ -177,7 +191,7 @@ interface TxSignBuilderConfig {
+     txComplete: CML.Transaction;
+     witnessSetBuilder: CML.TransactionWitnessSetBuilder;
+     programs: Effect.Effect<void, TransactionSignError, never>[];
+-    lucidConfig: LucidConfig;
++    wallet: Wallet | undefined;
+     fee: number;
+     exUnits: {
+         cpu: number;
+@@ -237,7 +251,13 @@ interface TxSignBuilder {
+     /** Safely completes the transaction. */
+     completeSafe: () => Promise<Either<TxSigned, TransactionSignError>>;
+ }
+-declare const makeTxSignBuilder: (lucidConfig: LucidConfig, tx: CML.Transaction) => TxSignBuilder;
++declare const makeTxSignBuilder: (wallet: Wallet | undefined, tx: CML.Transaction) => TxSignBuilder;
++
++declare const TxConfig_base: Context.TagClass<TxConfig, "TxConfig", {
++    readonly config: TxBuilderConfig;
++}>;
++declare class TxConfig extends TxConfig_base {
++}
+ 
+ type CompleteOptions = {
+     /**
+@@ -295,8 +315,8 @@ type TxBuilderConfig = {
+         type: ScriptType;
+         script: string;
+     }>;
+-    programs: Effect.Effect<void, TransactionError, never>[];
+-    partialPrograms: Map<RedeemerBuilder, (redeemer?: string) => Effect.Effect<void, TransactionError, never>>;
++    programs: Effect.Effect<void, TransactionError, TxConfig>[];
++    partialPrograms: Map<RedeemerBuilder, (redeemer?: string) => Effect.Effect<void, TransactionError, TxConfig>>;
+     minFee: bigint | undefined;
+ };
+ type TxBuilder = {
+@@ -304,8 +324,60 @@ type TxBuilder = {
+     collectFrom: (utxos: UTxO[], redeemer?: string | RedeemerBuilder) => TxBuilder;
+     pay: {
+         ToAddress: (address: string, assets: Assets) => TxBuilder;
+-        ToAddressWithData: (address: string, outputDatum: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
+-        ToContract: (address: string, outputDatum: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
++        /**
++         * Creates an output that lock funds to a target address, with optional parameters for attaching a datum, assets, and a reference script.
++         *
++         * **Warning:** When working with Plutus V1 or V2 contracts, omitting the `outputDatum` can result in a permanently locked UTXO.
++         *
++         * @example
++         * ```ts
++         * const refScript: Script = {
++         *   type: "PlutusV3",
++         *   script: "450100002499",
++         *  };
++         *
++         * const signBuilder = await user
++         *   .newTx()
++         *   .pay.ToAddressWithData(
++         *     "addr1q98wl3hnya9l94rt58ky533deyqe9t8zz5n9su26k8e5g23yar4q0adtaax9q9g0kphpv2ws7vxqwu6ln6pqx7j29nfqsfy9mg",
++         *     {
++         *       kind: "inline",
++         *       value: "d8799f44deadbeefff",
++         *     },
++         *     { lovelace: 10_000_000n },
++         *     refScript
++         *   )
++         *   .complete();
++         * ```
++         */
++        ToAddressWithData: (address: string, outputDatum?: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
++        /**
++         * Creates an output that lock funds to a target address, with optional parameters for attaching a datum, assets, and a reference script.
++         *
++         * **Warning:** When working with Plutus V1 or V2 contracts, omitting the `outputDatum` can result in a permanently locked UTXO.
++         *
++         * @example
++         * ```ts
++         * const refScript: Script = {
++         *   type: "PlutusV3",
++         *   script: "450100002499",
++         *  };
++         *
++         * const signBuilder = await user
++         *   .newTx()
++         *   .pay.ToContract(
++         *     "addr1q98wl3hnya9l94rt58ky533deyqe9t8zz5n9su26k8e5g23yar4q0adtaax9q9g0kphpv2ws7vxqwu6ln6pqx7j29nfqsfy9mg",
++         *     {
++         *       kind: "inline",
++         *       value: "d8799f44deadbeefff",
++         *     },
++         *     { lovelace: 10_000_000n },
++         *     refScript
++         *   )
++         *   .complete();
++         * ```
++         */
++        ToContract: (address: string, outputDatum?: OutputDatum, assets?: Assets | undefined, scriptRef?: Script | undefined) => TxBuilder;
+     };
+     addSigner: (address: Address | RewardAddress) => TxBuilder;
+     addSignerKey: (keyHash: PaymentKeyHash | StakeKeyHash) => TxBuilder;
+@@ -361,13 +433,13 @@ type TxBuilder = {
+     complete: (options?: CompleteOptions) => Promise<TxSignBuilder>;
+     completeProgram: (options?: CompleteOptions) => Effect.Effect<TxSignBuilder, TransactionError>;
+     completeSafe: (options?: CompleteOptions) => Promise<Either<TxSignBuilder, TransactionError>>;
+-    chainProgram: () => Effect.Effect<[
++    chainProgram: (options?: CompleteOptions) => Effect.Effect<[
+         UTxO[],
+         UTxO[],
+         TxSignBuilder
+     ], TransactionError, never>;
+-    chain: () => Promise<[UTxO[], UTxO[], TxSignBuilder]>;
+-    chainSafe: () => Promise<Either<[UTxO[], UTxO[], TxSignBuilder], TransactionError>>;
++    chain: (options?: CompleteOptions) => Promise<[UTxO[], UTxO[], TxSignBuilder]>;
++    chainSafe: (options?: CompleteOptions) => Promise<Either<[UTxO[], UTxO[], TxSignBuilder], TransactionError>>;
+     /**
+      * **Warning:** This method executes all programs and mutates the TxBuilder state.
+      *
+@@ -376,15 +448,23 @@ type TxBuilder = {
+      * It is recommended to call `.config()` only for debugging purposes
+      */
+     config: () => Promise<TxBuilderConfig>;
++    /**
++     * Returns the raw TxBuilderConfig
++     */
++    rawConfig: () => TxBuilderConfig;
+     /**
+      * Returns the current lucid instance configuration
+      */
+     lucidConfig: () => LucidConfig;
++    /**
++     * Returns the current txbuilder programs
++     */
++    getPrograms: () => Effect.Effect<void, TransactionError, TxConfig>[];
+ };
+ declare function makeTxBuilder(lucidConfig: LucidConfig): TxBuilder;
+ 
+ type LucidEvolution = {
+-    config: () => LucidConfig;
++    config: () => Partial<LucidConfig>;
+     wallet: () => Wallet;
+     overrideUTxOs: (utxos: UTxO[]) => void;
+     switchProvider: (provider: Provider) => Promise<void>;
+@@ -401,6 +481,7 @@ type LucidEvolution = {
+         fromAddress: (address: string, utxos: UTxO[]) => void;
+     };
+     currentSlot: () => number;
++    unixTimeToSlot: (unixTime: UnixTime) => number;
+     utxosAt: (addressOrCredential: string | Credential) => Promise<UTxO[]>;
+     utxosAtWithUnit: (addressOrCredential: string | Credential, unit: string) => Promise<UTxO[]>;
+     utxoByUnit: (unit: string) => Promise<UTxO>;
+@@ -425,6 +506,6 @@ type LucidOptions = {
+      */
+     presetProtocolParameters?: ProtocolParameters;
+ };
+-declare const Lucid: (provider: Provider, network: Network, options?: LucidOptions) => Promise<LucidEvolution>;
++declare const Lucid: (provider?: Provider | undefined, network?: Network, options?: LucidOptions) => Promise<LucidEvolution>;
+ 
+-export { type CBORHex, ERROR_MESSAGE, type Hash, Lucid, type LucidConfig, type LucidEvolution, type OutputDatum, RunTimeError, type TransactionError, type TransactionSignError, type TxBuilder, type TxBuilderConfig, TxBuilderError, type TxSignBuilder, type TxSignBuilderConfig, type TxSigned, TxSignerError, TxSubmitError, makeReturn, makeSubmit, makeTxBuilder, makeTxSignBuilder };
++export { type CBORHex, ERROR_MESSAGE, type Hash, Lucid, type LucidConfig, type LucidEvolution, NullableError, type OutputDatum, RunTimeError, type TransactionError, type TransactionSignError, type TxBuilder, type TxBuilderConfig, TxBuilderError, type TxSignBuilder, type TxSignBuilderConfig, type TxSigned, TxSignerError, TxSubmitError, UnauthorizedNetwork, makeReturn, makeSubmit, makeTxBuilder, makeTxSignBuilder };
+diff --git a/node_modules/@lucid-evolution/lucid/dist/index.js b/node_modules/@lucid-evolution/lucid/dist/index.js
+index 2f32ffa..520a95c 100644
+--- a/node_modules/@lucid-evolution/lucid/dist/index.js
++++ b/node_modules/@lucid-evolution/lucid/dist/index.js
+@@ -43,8 +43,8 @@ import {
+ } from "@lucid-evolution/utils";
+ 
+ // src/tx-builder/internal/Collect.ts
+-import { Effect as Effect3 } from "effect";
+-import { Data as Data3 } from "@lucid-evolution/plutus";
++import { Effect as Effect4, pipe as pipe2 } from "effect";
++import { Data as Data4 } from "@lucid-evolution/plutus";
+ import { utxoToCore } from "@lucid-evolution/utils";
+ 
+ // src/Errors.ts
+@@ -67,6 +67,12 @@ var ERROR_MESSAGE = {
+   MISSING_SCRIPT: (hash) => `MISSING_SCRIPT: Script not found when building transaction, consider using attach modules. script_hash: ${hash}`,
+   MISSING_POLICY: (policyId) => `MISSING_POLICY: No policy found, policy_id: ${policyId}`
+ };
++var NullableError = class extends Data2.TaggedError("NullableError") {
++};
++var UnauthorizedNetwork = class extends Data2.TaggedError(
++  "UnauthorizedNetwork"
++) {
++};
+ var TxBuilderError = class extends Data2.TaggedError("TxBuilderError") {
+   get message() {
+     return `${this.cause}`;
+@@ -95,6 +101,7 @@ import * as CML3 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ import * as CML2 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ import { Effect as Effect2, pipe } from "effect";
+ import { networkToId, getAddressDetails } from "@lucid-evolution/utils";
++import { Data as Data3 } from "@lucid-evolution/plutus";
+ var txBuilderError = (cause) => new TxBuilderError({ cause: `{ TxBuilderError : ${cause} }` });
+ var toCMLAddress = (address, lucidConfig) => Effect2.gen(function* ($) {
+   const { type } = yield* validateAddressDetails(address, lucidConfig);
+@@ -210,30 +217,45 @@ var validateAndGetStakeCredential = (rewardAddress, config) => Effect2.gen(funct
+   );
+   return stakeCredential;
+ });
++var resolveDatum = (datumHash, datum, provider) => Effect2.gen(function* () {
++  if (!datumHash || datum) return datum;
++  return yield* pipe(
++    Effect2.tryPromise({
++      try: () => provider.getDatum(datumHash),
++      catch: txBuilderError
++    }),
++    Effect2.map(Data3.to)
++  );
++});
+ 
+ // src/tx-builder/internal/Collect.ts
+ import { paymentCredentialOf } from "@lucid-evolution/utils";
++
++// src/tx-builder/internal/Service.ts
++import { Context } from "effect";
++var TxConfig = class extends Context.Tag("TxConfig")() {
++};
++
++// src/tx-builder/internal/Collect.ts
+ var collectError = (cause) => new TxBuilderError({ cause: `{ Collect: ${cause} }` });
+-var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => Effect3.gen(function* ($) {
+-  if (utxos.length === 0) yield* $(collectError(ERROR_MESSAGE.EMPTY_UTXO));
++var collectFromUTxO = (utxos, collectInputs = true) => (redeemer) => Effect4.gen(function* () {
++  const { config } = yield* TxConfig;
++  if (utxos.length === 0) yield* collectError(ERROR_MESSAGE.EMPTY_UTXO);
+   for (const utxo of utxos) {
+-    if (utxo.datumHash && !utxo.datum) {
+-      const data = yield* $(
+-        Effect3.tryPromise({
+-          try: () => datumOf(config.lucidConfig.provider, utxo),
+-          catch: (cause) => collectError({ cause })
+-        })
+-      );
+-      utxo.datum = Data3.to(data);
+-    }
+-    const coreUtxo = utxoToCore(utxo);
++    const resolvedDatum = yield* resolveDatum(
++      utxo.datumHash,
++      utxo.datum,
++      config.lucidConfig.provider
++    );
+     if (collectInputs) config.collectedInputs.push(utxo);
+-    const input = CML3.SingleInputBuilder.from_transaction_unspent_output(coreUtxo);
++    const input = CML3.SingleInputBuilder.from_transaction_unspent_output(
++      utxoToCore({ ...utxo, datum: resolvedDatum })
++    );
+     const credential = paymentCredentialOf(utxo.address);
+     if (credential.type == "Script") {
+-      const script = yield* $(
+-        Effect3.fromNullable(config.scripts.get(credential.hash)),
+-        Effect3.orElseFail(
++      const script = yield* pipe2(
++        Effect4.fromNullable(config.scripts.get(credential.hash)),
++        Effect4.orElseFail(
+           () => collectError(
+             collectError(ERROR_MESSAGE.MISSING_SCRIPT(credential.hash))
+           )
+@@ -249,9 +271,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => Eff
+           );
+           break;
+         case "PlutusV1": {
+-          const red = yield* $(
+-            Effect3.fromNullable(redeemer),
+-            Effect3.orElseFail(
++          const red = yield* pipe2(
++            Effect4.fromNullable(redeemer),
++            Effect4.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -266,9 +288,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => Eff
+         }
+         case "PlutusV2": {
+           const v2 = toV2(script.script);
+-          const red = yield* $(
+-            Effect3.fromNullable(redeemer),
+-            Effect3.orElseFail(
++          const red = yield* pipe2(
++            Effect4.fromNullable(redeemer),
++            Effect4.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -287,9 +309,9 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => Eff
+         }
+         case "PlutusV3": {
+           const v3 = toV3(script.script);
+-          const red = yield* $(
+-            Effect3.fromNullable(redeemer),
+-            Effect3.orElseFail(
++          const red = yield* pipe2(
++            Effect4.fromNullable(redeemer),
++            Effect4.orElseFail(
+               () => collectError(ERROR_MESSAGE.MISSING_REDEEMER)
+             )
+           );
+@@ -312,43 +334,40 @@ var collectFromUTxO = (config, utxos, collectInputs = true) => (redeemer) => Eff
+     }
+   }
+ });
+-var collectFromUTxOPartial = (config, utxos, redeemerBuilder) => Effect3.gen(function* ($) {
++var collectFromUTxOPartial = (utxos, redeemerBuilder) => Effect4.gen(function* () {
++  const { config } = yield* TxConfig;
+   if (utxos.length === 0) yield* collectError(ERROR_MESSAGE.EMPTY_UTXO);
+   if (redeemerBuilder.kind === "self") redeemerBuilder.inputs = utxos;
+   for (const utxo of utxos) {
+     if (utxo.datumHash && !utxo.datum) {
+-      const data = yield* $(
+-        Effect3.tryPromise({
+-          try: () => datumOf(config.lucidConfig.provider, utxo),
+-          catch: (cause) => collectError({ cause })
+-        })
+-      );
+-      utxo.datum = Data3.to(data);
++      const data = yield* Effect4.tryPromise({
++        try: () => datumOf(config.lucidConfig.provider, utxo),
++        catch: (cause) => collectError({ cause })
++      });
++      utxo.datum = Data4.to(data);
+     }
+     config.collectedInputs.push(utxo);
+   }
+-  const partialProgram = collectFromUTxO(config, utxos, false);
++  const partialProgram = collectFromUTxO(utxos, false);
+   config.partialPrograms.set(redeemerBuilder, partialProgram);
+ });
+ 
+ // src/tx-builder/internal/Read.ts
+-import { Effect as Effect4 } from "effect";
+-import { Data as Data4 } from "@lucid-evolution/plutus";
++import { Effect as Effect5 } from "effect";
+ import { utxoToCore as utxoToCore2 } from "@lucid-evolution/utils";
+ var readError = (cause) => new TxBuilderError({ cause: `{ Read : ${cause} }` });
+-var readFrom = (config, utxos) => Effect4.gen(function* () {
++var readFrom = (utxos) => Effect5.gen(function* () {
++  const { config } = yield* TxConfig;
+   if (utxos.length === 0) yield* readError(ERROR_MESSAGE.EMPTY_UTXO);
+   for (const utxo of utxos) {
+-    if (utxo.datumHash) {
+-      const data = yield* Effect4.tryPromise({
+-        try: () => datumOf(config.lucidConfig.provider, utxo),
+-        catch: (cause) => readError(cause)
+-      });
+-      utxo.datum = Data4.to(data);
+-    }
+-    const coreUtxo = utxoToCore2(utxo);
+-    config.readInputs.push(utxo);
++    const resolvedDatum = yield* resolveDatum(
++      utxo.datumHash,
++      utxo.datum,
++      config.lucidConfig.provider
++    );
++    const coreUtxo = utxoToCore2({ ...utxo, datum: resolvedDatum });
+     config.txBuilder.add_reference_input(coreUtxo);
++    config.readInputs.push(utxo);
+   }
+ });
+ 
+@@ -388,7 +407,7 @@ var attachVoteValidator = (voteValidator) => attachScript(voteValidator);
+ var attachProposeValidator = (proposeValidator) => attachScript(proposeValidator);
+ 
+ // src/tx-builder/internal/Pay.ts
+-import { Effect as Effect5 } from "effect";
++import { Effect as Effect6 } from "effect";
+ import {
+   addAssets,
+   assetsToValue,
+@@ -397,7 +416,8 @@ import {
+   valueToAssets
+ } from "@lucid-evolution/utils";
+ var payError = (cause) => new TxBuilderError({ cause: `{ Pay: ${cause} }` });
+-var payToAddress = (config, address, assets) => Effect5.gen(function* () {
++var payToAddress = (address, assets) => Effect6.gen(function* () {
++  const { config } = yield* TxConfig;
+   const outputBuilder = CML.TransactionOutputBuilder.new().with_address(yield* toCMLAddress(address, config.lucidConfig)).next();
+   if (Object.keys(assets).length == 0)
+     yield* payError(ERROR_MESSAGE.EMPTY_ASSETS);
+@@ -423,7 +443,8 @@ var payToAddress = (config, address, assets) => Effect5.gen(function* () {
+   ];
+   config.txBuilder.add_output(outputResult);
+ });
+-var payToAddressWithData = (config, address, outputDatum, assets, scriptRef) => Effect5.gen(function* () {
++var ToAddressWithData = (address, outputDatum, assets, scriptRef) => Effect6.gen(function* () {
++  const { config } = yield* TxConfig;
+   const outputBuilder = buildBaseOutput(address, outputDatum, scriptRef);
+   assets ??= {};
+   const value = assetsToValue(assets);
+@@ -448,51 +469,52 @@ var payToAddressWithData = (config, address, outputDatum, assets, scriptRef) =>
+   ];
+   config.txBuilder.add_output(outputResult);
+ });
+-var payToContract = (config, address, outputDatum, assets, scriptRef) => Effect5.gen(function* () {
+-  if (!outputDatum.value) yield* payError(ERROR_MESSAGE.DATUM_NOT_SET);
+-  return yield* payToAddressWithData(
+-    config,
+-    address,
+-    outputDatum,
+-    assets,
+-    scriptRef
+-  );
+-});
++var ToContract = (address, outputDatum, assets, scriptRef) => ToAddressWithData(address, outputDatum, assets, scriptRef);
+ var buildBaseOutput = (address, outputDatum, scriptRef) => {
+   let baseBuilder;
+   const addressBuilder = CML.TransactionOutputBuilder.new().with_address(
+     CML.Address.from_bech32(address)
+   );
+-  switch (outputDatum.kind) {
+-    case "hash": {
+-      const datumOption = CML.DatumOption.new_hash(
+-        CML.DatumHash.from_hex(outputDatum.value)
++  if (outputDatum) {
++    if (outputDatum.value.trim() === "") {
++      throw new Error(
++        "datum value is missing. Please provide a non-empty cbor hex data."
+       );
+-      baseBuilder = addressBuilder.with_data(datumOption);
+-      break;
+     }
+-    case "asHash": {
+-      const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
+-      baseBuilder = addressBuilder.with_communication_data(plutusData);
+-      break;
+-    }
+-    case "inline": {
+-      const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
+-      const datumOption = CML.DatumOption.new_datum(plutusData);
+-      baseBuilder = addressBuilder.with_data(datumOption);
+-      break;
++    switch (outputDatum.kind) {
++      case "hash": {
++        const datumOption = CML.DatumOption.new_hash(
++          CML.DatumHash.from_hex(outputDatum.value)
++        );
++        baseBuilder = addressBuilder.with_data(datumOption);
++        break;
++      }
++      case "asHash": {
++        const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
++        baseBuilder = addressBuilder.with_communication_data(plutusData);
++        break;
++      }
++      case "inline": {
++        const plutusData = CML.PlutusData.from_cbor_hex(outputDatum.value);
++        const datumOption = CML.DatumOption.new_datum(plutusData);
++        baseBuilder = addressBuilder.with_data(datumOption);
++        break;
++      }
++      default:
++        throw new Error(`Unknown outputDatum: ${outputDatum}`);
+     }
+-    default:
+-      throw new Error(`Unknown outputDatum: ${outputDatum}`);
++  } else {
++    baseBuilder = addressBuilder;
+   }
+   return scriptRef ? baseBuilder.with_reference_script(toScriptRef(scriptRef)).next() : baseBuilder.next();
+ };
+ 
+ // src/tx-builder/internal/Mint.ts
+-import { Effect as Effect6, pipe as pipe3 } from "effect";
++import { Effect as Effect7, pipe as pipe3 } from "effect";
+ import * as CML4 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ var mintError = (cause) => new TxBuilderError({ cause: `{ Mint: ${cause} }` });
+-var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
++var mintAssets = (assets) => (redeemer) => Effect7.gen(function* () {
++  const { config } = yield* TxConfig;
+   const units = Object.keys(assets);
+   const policyId = units[0].slice(0, 56);
+   const mintAssets2 = CML4.MapAssetNameToNonZeroInt64.new();
+@@ -504,8 +526,8 @@ var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
+   }
+   const mintBuilder = CML4.SingleMintBuilder.new(mintAssets2);
+   const policy = yield* pipe3(
+-    Effect6.fromNullable(config.scripts.get(policyId)),
+-    Effect6.orElseFail(
++    Effect7.fromNullable(config.scripts.get(policyId)),
++    Effect7.orElseFail(
+       () => mintError(ERROR_MESSAGE.MISSING_POLICY(policyId))
+     )
+   );
+@@ -520,8 +542,8 @@ var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
+       break;
+     case "PlutusV1": {
+       const red = yield* pipe3(
+-        Effect6.fromNullable(redeemer),
+-        Effect6.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++        Effect7.fromNullable(redeemer),
++        Effect7.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -533,8 +555,8 @@ var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
+     }
+     case "PlutusV2": {
+       const red = yield* pipe3(
+-        Effect6.fromNullable(redeemer),
+-        Effect6.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++        Effect7.fromNullable(redeemer),
++        Effect7.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -546,8 +568,8 @@ var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
+     }
+     case "PlutusV3": {
+       const red = yield* pipe3(
+-        Effect6.fromNullable(redeemer),
+-        Effect6.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
++        Effect7.fromNullable(redeemer),
++        Effect7.orElseFail(() => mintError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       config.txBuilder.add_mint(
+         mintBuilder.plutus_script(
+@@ -561,59 +583,64 @@ var mintAssets = (config, assets) => (redeemer) => Effect6.gen(function* () {
+ });
+ 
+ // src/tx-builder/internal/Interval.ts
+-import { Effect as Effect7 } from "effect";
++import { Effect as Effect8 } from "effect";
+ import { unixTimeToSlot } from "@lucid-evolution/utils";
+-var validFrom = (config, unixTime) => Effect7.gen(function* () {
++var validFrom = (unixTime) => Effect8.gen(function* () {
++  const { config } = yield* TxConfig;
+   const slot = unixTimeToSlot(config.lucidConfig.network, unixTime);
+   config.txBuilder.set_validity_start_interval(BigInt(slot));
+ });
+-var validTo = (config, unixTime) => Effect7.gen(function* () {
++var validTo = (unixTime) => Effect8.gen(function* () {
++  const { config } = yield* TxConfig;
+   const slot = unixTimeToSlot(config.lucidConfig.network, unixTime);
+   config.txBuilder.set_ttl(BigInt(slot));
+ });
+ 
+ // src/tx-builder/internal/Signer.ts
+-import { Effect as Effect8, pipe as pipe4 } from "effect";
++import { Effect as Effect9, pipe as pipe4 } from "effect";
+ import * as CML5 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ var addSignerError = (cause) => new TxBuilderError({ cause: `{ Signer: ${cause} }` });
+-var addSigner = (config, address) => Effect8.gen(function* () {
++var addSigner = (address) => Effect9.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* validateAddressDetails(
+     address,
+     config.lucidConfig
+   );
+   const credential = addressDetails.type === "Reward" ? yield* pipe4(
+-    Effect8.fromNullable(addressDetails.stakeCredential),
+-    Effect8.orElseFail(
++    Effect9.fromNullable(addressDetails.stakeCredential),
++    Effect9.orElseFail(
+       () => addSignerError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   ) : yield* pipe4(
+-    Effect8.fromNullable(addressDetails.paymentCredential),
+-    Effect8.orElseFail(
++    Effect9.fromNullable(addressDetails.paymentCredential),
++    Effect9.orElseFail(
+       () => addSignerError(ERROR_MESSAGE.MISSING_PAYMENT_CREDENTIAL)
+     )
+   );
+   if (credential.type === "Script")
+     yield* addSignerError(ERROR_MESSAGE.SCRIPT_CREDENTIAL_NOT_ALLOWED);
+   return credential.hash;
+-}).pipe(Effect8.flatMap((keyHash) => addSignerKey(config, keyHash)));
+-var addSignerKey = (config, keyHash) => Effect8.gen(function* () {
++}).pipe(Effect9.flatMap((keyHash) => addSignerKey(keyHash)));
++var addSignerKey = (keyHash) => Effect9.gen(function* () {
++  const { config } = yield* TxConfig;
+   config.txBuilder.add_required_signer(CML5.Ed25519KeyHash.from_hex(keyHash));
+ });
+ 
+ // src/tx-builder/internal/Stake.ts
+-import { Effect as Effect9, pipe as pipe5 } from "effect";
++import { Effect as Effect10, pipe as pipe5 } from "effect";
+ import * as CML6 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ var stakeError = (cause) => new TxBuilderError({ cause: `{ Stake: ${cause} }` });
+-var registerStake = (config, rewardAddress) => Effect9.gen(function* () {
++var registerStake = (rewardAddress) => Effect10.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* pipe5(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    Effect9.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect9.succeed(address)
++    Effect10.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect10.succeed(address)
+     )
+   );
+   const stakeCredential = yield* pipe5(
+-    Effect9.fromNullable(addressDetails.stakeCredential),
+-    Effect9.orElseFail(
++    Effect10.fromNullable(addressDetails.stakeCredential),
++    Effect10.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -627,16 +654,17 @@ var registerStake = (config, rewardAddress) => Effect9.gen(function* () {
+   );
+   config.txBuilder.add_cert(certBuilder.skip_witness());
+ });
+-var deRegisterStake = (config, rewardAddress, redeemer) => Effect9.gen(function* () {
++var deRegisterStake = (rewardAddress, redeemer) => Effect10.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* pipe5(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    Effect9.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect9.succeed(address)
++    Effect10.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect10.succeed(address)
+     )
+   );
+   const stakeCredential = yield* pipe5(
+-    Effect9.fromNullable(addressDetails.stakeCredential),
+-    Effect9.orElseFail(
++    Effect10.fromNullable(addressDetails.stakeCredential),
++    Effect10.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -663,14 +691,14 @@ var deRegisterStake = (config, rewardAddress, redeemer) => Effect9.gen(function*
+       );
+       const certBuilder = createCertBuilder(credential, config);
+       const script = yield* pipe5(
+-        Effect9.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        Effect9.orElseFail(
++        Effect10.fromNullable(config.scripts.get(stakeCredential.hash)),
++        Effect10.orElseFail(
+           () => stakeError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+       const handleRedeemer = () => pipe5(
+-        Effect9.fromNullable(redeemer),
+-        Effect9.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
++        Effect10.fromNullable(redeemer),
++        Effect10.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       switch (script.type) {
+         case "PlutusV1": {
+@@ -716,35 +744,36 @@ var deRegisterStake = (config, rewardAddress, redeemer) => Effect9.gen(function*
+     }
+   }
+ });
+-var withdraw = (config, rewardAddress, amount) => (redeemer) => Effect9.gen(function* ($) {
++var withdraw = (rewardAddress, amount) => (redeemer) => Effect10.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* pipe5(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    Effect9.andThen(
+-      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect9.succeed(address)
++    Effect10.andThen(
++      (address) => address.type !== "Reward" ? stakeError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect10.succeed(address)
+     )
+   );
+   const withdrawBuilder = yield* pipe5(
+-    Effect9.fromNullable(
++    Effect10.fromNullable(
+       CML6.RewardAddress.from_address(
+         CML6.Address.from_bech32(rewardAddress)
+       )
+     ),
+-    Effect9.orElseFail(
++    Effect10.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     ),
+-    Effect9.andThen(
++    Effect10.andThen(
+       (address) => CML6.SingleWithdrawalBuilder.new(address, amount)
+     )
+   );
+   const stakeCredential = yield* pipe5(
+-    Effect9.fromNullable(addressDetails.stakeCredential),
+-    Effect9.orElseFail(
++    Effect10.fromNullable(addressDetails.stakeCredential),
++    Effect10.orElseFail(
+       () => stakeError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+   const handleRedeemer = () => pipe5(
+-    Effect9.fromNullable(redeemer),
+-    Effect9.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
++    Effect10.fromNullable(redeemer),
++    Effect10.orElseFail(() => stakeError(ERROR_MESSAGE.MISSING_REDEEMER))
+   );
+   switch (stakeCredential.type) {
+     case "Key": {
+@@ -753,8 +782,8 @@ var withdraw = (config, rewardAddress, amount) => (redeemer) => Effect9.gen(func
+     }
+     case "Script": {
+       const script = yield* pipe5(
+-        Effect9.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        Effect9.orElseFail(
++        Effect10.fromNullable(config.scripts.get(stakeCredential.hash)),
++        Effect10.orElseFail(
+           () => stakeError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+@@ -804,20 +833,21 @@ var withdraw = (config, rewardAddress, amount) => (redeemer) => Effect9.gen(func
+ });
+ 
+ // src/tx-builder/internal/Pool.ts
+-import { Effect as Effect10, pipe as pipe6 } from "effect";
++import { Effect as Effect11, pipe as pipe6 } from "effect";
+ import * as CML7 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+ import { fromText } from "@lucid-evolution/core-utils";
+ var poolError = (cause) => new TxBuilderError({ cause: `{ Pool : ${cause} }` });
+-var delegateTo = (config, rewardAddress, poolId, redeemer) => Effect10.gen(function* () {
++var delegateTo = (rewardAddress, poolId, redeemer) => Effect11.gen(function* () {
++  const { config } = yield* TxConfig;
+   const addressDetails = yield* pipe6(
+     validateAddressDetails(rewardAddress, config.lucidConfig),
+-    Effect10.andThen(
+-      (address) => address.type !== "Reward" ? poolError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect10.succeed(address)
++    Effect11.andThen(
++      (address) => address.type !== "Reward" ? poolError(ERROR_MESSAGE.MISSING_REWARD_TYPE) : Effect11.succeed(address)
+     )
+   );
+   const stakeCredential = yield* pipe6(
+-    Effect10.fromNullable(addressDetails.stakeCredential),
+-    Effect10.orElseFail(
++    Effect11.fromNullable(addressDetails.stakeCredential),
++    Effect11.orElseFail(
+       () => poolError(ERROR_MESSAGE.MISSING_STAKE_CREDENTIAL)
+     )
+   );
+@@ -846,14 +876,14 @@ var delegateTo = (config, rewardAddress, poolId, redeemer) => Effect10.gen(funct
+         )
+       );
+       const script = yield* pipe6(
+-        Effect10.fromNullable(config.scripts.get(stakeCredential.hash)),
+-        Effect10.orElseFail(
++        Effect11.fromNullable(config.scripts.get(stakeCredential.hash)),
++        Effect11.orElseFail(
+           () => poolError(ERROR_MESSAGE.MISSING_SCRIPT(stakeCredential.hash))
+         )
+       );
+       const handleRedeemer = () => pipe6(
+-        Effect10.fromNullable(redeemer),
+-        Effect10.orElseFail(() => poolError(ERROR_MESSAGE.MISSING_REDEEMER))
++        Effect11.fromNullable(redeemer),
++        Effect11.orElseFail(() => poolError(ERROR_MESSAGE.MISSING_REDEEMER))
+       );
+       switch (script.type) {
+         case "PlutusV1": {
+@@ -905,8 +935,9 @@ import {
+   toCMLDRep
+ } from "@lucid-evolution/core-types";
+ import * as CML8 from "@anastasia-labs/cardano-multiplatform-lib-nodejs";
+-import { Effect as Effect11 } from "effect";
+-var delegateVoteToDRep = (config, rewardAddress, drep, redeemer) => Effect11.gen(function* () {
++import { Effect as Effect12 } from "effect";
++var delegateVoteToDRep = (rewardAddress, drep, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -917,7 +948,8 @@ var delegateVoteToDRep = (config, rewardAddress, drep, redeemer) => Effect11.gen
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var delegateVoteToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer) => Effect11.gen(function* () {
++var delegateVoteToPoolAndDRep = (rewardAddress, poolId, drep, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -932,7 +964,8 @@ var delegateVoteToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer)
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToPool = (config, rewardAddress, poolId, redeemer) => Effect11.gen(function* () {
++var registerAndDelegateToPool = (rewardAddress, poolId, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -946,7 +979,8 @@ var registerAndDelegateToPool = (config, rewardAddress, poolId, redeemer) => Eff
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToDRep = (config, rewardAddress, drep, redeemer) => Effect11.gen(function* () {
++var registerAndDelegateToDRep = (rewardAddress, drep, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -961,7 +995,8 @@ var registerAndDelegateToDRep = (config, rewardAddress, drep, redeemer) => Effec
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerAndDelegateToPoolAndDRep = (config, rewardAddress, poolId, drep, redeemer) => Effect11.gen(function* () {
++var registerAndDelegateToPoolAndDRep = (rewardAddress, poolId, drep, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -977,7 +1012,8 @@ var registerAndDelegateToPoolAndDRep = (config, rewardAddress, poolId, drep, red
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var registerDRep = (config, rewardAddress, anchor, redeemer) => Effect11.gen(function* () {
++var registerDRep = (rewardAddress, anchor, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -995,7 +1031,8 @@ var registerDRep = (config, rewardAddress, anchor, redeemer) => Effect11.gen(fun
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var deregisterDRep = (config, rewardAddress, redeemer) => Effect11.gen(function* () {
++var deregisterDRep = (rewardAddress, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1008,7 +1045,8 @@ var deregisterDRep = (config, rewardAddress, redeemer) => Effect11.gen(function*
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var updateDRep = (config, rewardAddress, anchor, redeemer) => Effect11.gen(function* () {
++var updateDRep = (rewardAddress, anchor, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const stakeCredential = yield* validateAndGetStakeCredential(
+     rewardAddress,
+     config
+@@ -1022,7 +1060,8 @@ var updateDRep = (config, rewardAddress, anchor, redeemer) => Effect11.gen(funct
+   );
+   yield* processCertificate(stakeCredential, config, buildCert, redeemer);
+ });
+-var authCommitteeHot = (config, coldAddress, hotAddress, redeemer) => Effect11.gen(function* () {
++var authCommitteeHot = (coldAddress, hotAddress, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const coldCred = yield* validateAndGetStakeCredential(coldAddress, config);
+   const hotCred = yield* validateAndGetStakeCredential(hotAddress, config);
+   const hotCredential = hotCred.type === "Key" ? CML8.Credential.new_pub_key(CML8.Ed25519KeyHash.from_hex(hotCred.hash)) : CML8.Credential.new_script(CML8.ScriptHash.from_hex(hotCred.hash));
+@@ -1031,7 +1070,8 @@ var authCommitteeHot = (config, coldAddress, hotAddress, redeemer) => Effect11.g
+   );
+   yield* processCertificate(coldCred, config, buildCert, redeemer);
+ });
+-var resignCommitteeHot = (config, coldAddress, anchor, redeemer) => Effect11.gen(function* () {
++var resignCommitteeHot = (coldAddress, anchor, redeemer) => Effect12.gen(function* () {
++  const { config } = yield* TxConfig;
+   const coldCred = yield* validateAndGetStakeCredential(coldAddress, config);
+   const cmlAnchor = anchor ? CML8.Anchor.new(
+     CML8.Url.from_json(anchor.url),
+@@ -1044,10 +1084,10 @@ var resignCommitteeHot = (config, coldAddress, anchor, redeemer) => Effect11.gen
+ });
+ 
+ // src/tx-builder/internal/Metadata.ts
+-import { Effect as Effect12 } from "effect";
++import { Effect as Effect13 } from "effect";
+ import * as S from "@effect/schema/Schema";
+ import { toHex } from "@lucid-evolution/core-utils";
+-var attachMetadata = (config, label, metadata) => Effect12.gen(function* () {
++var attachMetadata = (config, label, metadata) => Effect13.gen(function* () {
+   const auxiliaryData = CML.AuxiliaryData.new();
+   const meta = CML.Metadata.new();
+   meta.set(
+@@ -1098,7 +1138,7 @@ var toCardanoMetadata = (json) => {
+ 
+ // src/tx-builder/internal/CompleteTxBuilder.ts
+ import {
+-  Effect as Effect16,
++  Effect as Effect17,
+   pipe as pipe9,
+   Record as Record2,
+   Array as _Array,
+@@ -1112,13 +1152,13 @@ import * as UPLC from "@lucid-evolution/uplc";
+ import * as S3 from "@effect/schema/Schema";
+ 
+ // src/tx-sign-builder/internal/CompleteTxSigner.ts
+-import { Effect as Effect15, pipe as pipe8 } from "effect";
++import { Effect as Effect16, pipe as pipe8 } from "effect";
+ 
+ // src/tx-submit/TxSubmit.ts
+-import { Effect as Effect13 } from "effect";
++import { Effect as Effect14 } from "effect";
+ import * as S2 from "@effect/schema/Schema";
+ var makeSubmit = (wallet, txSigned) => {
+-  const submit = (options) => Effect13.tryPromise({
++  const submit = (options) => Effect14.tryPromise({
+     try: () => wallet.submitTx(
+       options.canonical ? txSigned.to_canonical_cbor_hex() : txSigned.to_cbor_hex()
+     ),
+@@ -1136,30 +1176,30 @@ var makeSubmit = (wallet, txSigned) => {
+ };
+ 
+ // src/tx-sign-builder/internal/Sign.ts
+-import { Effect as Effect14, pipe as pipe7 } from "effect";
++import { Effect as Effect15, pipe as pipe7 } from "effect";
+ var signError = (cause) => new TxSignerError({ cause });
+ var mkWitnessFromWallet = (wallet, txComplete) => pipe7(
+-  Effect14.fromNullable(wallet),
+-  Effect14.catchAll(() => signError(ERROR_MESSAGE.MISSING_WALLET)),
+-  Effect14.tryMapPromise({
++  Effect15.fromNullable(wallet),
++  Effect15.catchAll(() => signError(ERROR_MESSAGE.MISSING_WALLET)),
++  Effect15.tryMapPromise({
+     try: (wallet2) => wallet2.signTx(txComplete),
+     catch: (cause) => signError(cause)
+   })
+ );
+ var withWallet = (config) => pipe7(
+-  mkWitnessFromWallet(config.lucidConfig.wallet, config.txComplete),
+-  Effect14.map((witness) => config.witnessSetBuilder.add_existing(witness))
++  mkWitnessFromWallet(config.wallet, config.txComplete),
++  Effect15.map((witness) => config.witnessSetBuilder.add_existing(witness))
+ );
+ var partialWithWallet = (config) => pipe7(
+-  mkWitnessFromWallet(config.lucidConfig.wallet, config.txComplete),
+-  Effect14.map((witness) => witness.to_cbor_hex())
++  mkWitnessFromWallet(config.wallet, config.txComplete),
++  Effect15.map((witness) => witness.to_cbor_hex())
+ );
+ var mkWitnessFromPrivateKey = (privateKey, txComplete) => pipe7(
+-  Effect14.try({
++  Effect15.try({
+     try: () => CML.PrivateKey.from_bech32(privateKey),
+     catch: signError
+   }),
+-  Effect14.map(
++  Effect15.map(
+     (privateKey2) => CML.make_vkey_witness(
+       CML.hash_transaction(txComplete.body()),
+       privateKey2
+@@ -1168,30 +1208,30 @@ var mkWitnessFromPrivateKey = (privateKey, txComplete) => pipe7(
+ );
+ var withPrivateKey = (config, privateKey) => pipe7(
+   mkWitnessFromPrivateKey(privateKey, config.txComplete),
+-  Effect14.map((witness) => config.witnessSetBuilder.add_vkey(witness))
++  Effect15.map((witness) => config.witnessSetBuilder.add_vkey(witness))
+ );
+ var partialWithPrivateKey = (config, privateKey) => pipe7(
+   mkWitnessFromPrivateKey(privateKey, config.txComplete),
+-  Effect14.map((witness) => {
++  Effect15.map((witness) => {
+     const witnessBuilder = CML.TransactionWitnessSetBuilder.new();
+     witnessBuilder.add_vkey(witness);
+     return witnessBuilder.build().to_cbor_hex();
+   })
+ );
+-var assemble = (config, witnesses) => Effect14.forEach(
++var assemble = (config, witnesses) => Effect15.forEach(
+   witnesses,
+   (witness) => pipe7(
+-    Effect14.try({
++    Effect15.try({
+       try: () => CML.TransactionWitnessSet.from_cbor_hex(witness),
+       catch: signError
+     }),
+-    Effect14.map((witness2) => config.witnessSetBuilder.add_existing(witness2))
++    Effect15.map((witness2) => config.witnessSetBuilder.add_existing(witness2))
+   )
+ );
+ 
+ // src/tx-sign-builder/internal/CompleteTxSigner.ts
+-var completeTxSigner = (config) => Effect15.gen(function* () {
+-  yield* Effect15.all(config.programs, { concurrency: "unbounded" });
++var completeTxSigner = (config) => Effect16.gen(function* () {
++  yield* Effect16.all(config.programs, { concurrency: "unbounded" });
+   const plutus_datums = config.txComplete.witness_set().plutus_datums();
+   config.witnessSetBuilder.add_existing(config.txComplete.witness_set());
+   if (plutus_datums) {
+@@ -1207,14 +1247,14 @@ var completeTxSigner = (config) => Effect15.gen(function* () {
+     config.txComplete.auxiliary_data()
+   );
+   const wallet = yield* pipe8(
+-    Effect15.fromNullable(config.lucidConfig.wallet),
+-    Effect15.orElseFail(() => signError(ERROR_MESSAGE.MISSING_WALLET))
++    Effect16.fromNullable(config.wallet),
++    Effect16.orElseFail(() => signError(ERROR_MESSAGE.MISSING_WALLET))
+   );
+   return makeSubmit(wallet, signedTx);
+-}).pipe(Effect15.catchAllDefect((cause) => new RunTimeError({ cause })));
++}).pipe(Effect16.catchAllDefect((cause) => new RunTimeError({ cause })));
+ 
+ // src/tx-sign-builder/TxSignBuilder.ts
+-var makeTxSignBuilder = (lucidConfig, tx) => {
++var makeTxSignBuilder = (wallet, tx) => {
+   const redeemers = tx.witness_set().redeemers();
+   const exUnits = { cpu: 0, mem: 0 };
+   if (redeemers) {
+@@ -1241,7 +1281,7 @@ var makeTxSignBuilder = (lucidConfig, tx) => {
+     txComplete: tx,
+     witnessSetBuilder: CML.TransactionWitnessSetBuilder.new(),
+     programs: [],
+-    lucidConfig,
++    wallet,
+     fee: parseInt(tx.body().fee().toString()),
+     exUnits
+   };
+@@ -1296,13 +1336,15 @@ import {
+   toCMLRedeemerTag
+ } from "@lucid-evolution/utils";
+ import { SLOT_CONFIG_NETWORK } from "@lucid-evolution/plutus";
++import { isError } from "effect/Predicate";
+ var completeTxError = (cause) => new TxBuilderError({ cause: `{ Complete: ${cause} }` });
+-var complete = (config, options = {}) => Effect16.gen(function* () {
++var complete = (options = {}) => Effect17.gen(function* () {
++  const { config } = yield* TxConfig;
+   const wallet = yield* pipe9(
+-    Effect16.fromNullable(config.lucidConfig.wallet),
+-    Effect16.orElseFail(() => completeTxError(ERROR_MESSAGE.MISSING_WALLET))
++    Effect17.fromNullable(config.lucidConfig.wallet),
++    Effect17.orElseFail(() => completeTxError(ERROR_MESSAGE.MISSING_WALLET))
+   );
+-  const walletAddress = yield* Effect16.promise(() => wallet.address());
++  const walletAddress = yield* Effect17.promise(() => wallet.address());
+   const {
+     coinSelection = true,
+     changeAddress = walletAddress,
+@@ -1312,24 +1354,15 @@ var complete = (config, options = {}) => Effect16.gen(function* () {
+     includeLeftoverLovelaceAsFee = false,
+     presetWalletInputs = []
+   } = options;
+-  const walletInputs = presetWalletInputs.length === 0 ? yield* Effect16.tryPromise({
++  const walletInputs = presetWalletInputs.length === 0 ? yield* Effect17.tryPromise({
+     try: () => wallet.getUtxos(),
+     catch: (error) => completeTxError(error)
+   }) : presetWalletInputs;
+-  yield* Effect16.all(config.programs);
++  yield* Effect17.all(config.programs);
+   const hasPlutusScriptExecutions = Array.from(
+     config.scripts.values()
+   ).some((value) => value.type !== "Native");
+-  if (hasPlutusScriptExecutions) {
+-    const collateralInput = yield* findCollateral(
+-      config.lucidConfig.protocolParameters.coinsPerUtxoByte,
+-      setCollateral,
+-      walletInputs
+-    );
+-    applyCollateral(config, setCollateral, collateralInput, changeAddress);
+-  }
+   yield* selectionAndEvaluation(
+-    config,
+     walletInputs,
+     changeAddress,
+     coinSelection,
+@@ -1337,9 +1370,23 @@ var complete = (config, options = {}) => Effect16.gen(function* () {
+     includeLeftoverLovelaceAsFee,
+     false
+   );
+-  if (hasPlutusScriptExecutions)
++  if (hasPlutusScriptExecutions) {
++    const minFee = config.txBuilder.min_fee(true);
++    const refScriptFee = yield* calculateMinRefScriptFee(config);
++    let estimatedFee = minFee + refScriptFee;
++    const totalCollateral = BigInt(
++      Math.max(
++        config.lucidConfig.protocolParameters.collateralPercentage * Number(estimatedFee) / 100,
++        Number(setCollateral)
++      )
++    );
++    const collateralInput = yield* findCollateral(
++      config.lucidConfig.protocolParameters.coinsPerUtxoByte,
++      totalCollateral,
++      walletInputs
++    );
++    yield* applyCollateral(totalCollateral, collateralInput, changeAddress);
+     yield* selectionAndEvaluation(
+-      config,
+       walletInputs,
+       changeAddress,
+       coinSelection,
+@@ -1347,11 +1394,12 @@ var complete = (config, options = {}) => Effect16.gen(function* () {
+       includeLeftoverLovelaceAsFee,
+       true
+     );
++  }
+   config.txBuilder.add_change_if_needed(
+     CML.Address.from_bech32(changeAddress),
+     true
+   );
+-  const transaction = yield* Effect16.try({
++  const transaction = yield* Effect17.try({
+     try: () => config.txBuilder.build(
+       CML.ChangeSelectionAlgo.Default,
+       CML.Address.from_bech32(changeAddress)
+@@ -1373,14 +1421,15 @@ var complete = (config, options = {}) => Effect16.gen(function* () {
+     updatedWalletInputs,
+     derivedInputs,
+     makeTxSignBuilder(
+-      config.lucidConfig,
++      config.lucidConfig.wallet,
+       canonical ? CML.Transaction.from_cbor_bytes(
+         transaction.to_canonical_cbor_bytes()
+       ) : transaction
+     )
+   );
+-}).pipe(Effect16.catchAllDefect((cause) => new RunTimeError({ cause })));
+-var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection, localUPLCEval, includeLeftoverLovelaceAsFee, script_calculation) => Effect16.gen(function* () {
++}).pipe(Effect17.catchAllDefect((cause) => new RunTimeError({ cause })));
++var selectionAndEvaluation = (walletInputs, changeAddress, coinSelection, localUPLCEval, includeLeftoverLovelaceAsFee, script_calculation) => Effect17.gen(function* () {
++  const { config } = yield* TxConfig;
+   const availableInputs = _Array.differenceWith(isEqualUTxO)(
+     walletInputs,
+     config.collectedInputs
+@@ -1390,7 +1439,7 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+     availableInputs,
+     script_calculation,
+     includeLeftoverLovelaceAsFee
+-  ) : { selected: [], burnable: {} };
++  ) : { selected: [], burnable: { lovelace: 0n } };
+   let estimatedFee = 0n;
+   if (_Array.isEmptyArray(inputsToAdd)) {
+     if (script_calculation) return;
+@@ -1412,9 +1461,9 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+       yield* completeTxError(
+         `RedeemerBuilder: Coin selection had to be updated after building redeemers, possibly leading to incorrect indices. Try setting a minimum fee of ${estimatedFee} lovelaces.`
+       );
+-    } else yield* completePartialPrograms(config);
++    } else yield* completePartialPrograms();
+   }
+-  const txRedeemerBuilder = yield* Effect16.try({
++  const txRedeemerBuilder = yield* Effect17.try({
+     try: () => config.txBuilder.build_for_evaluation(
+       0,
+       CML.Address.from_bech32(changeAddress)
+@@ -1438,8 +1487,9 @@ var selectionAndEvaluation = (config, walletInputs, changeAddress, coinSelection
+       );
+     }
+   }
+-}).pipe(Effect16.catchAllDefect((cause) => new RunTimeError({ cause })));
+-var completePartialPrograms = (config) => Effect16.gen(function* () {
++}).pipe(Effect17.catchAllDefect((cause) => new RunTimeError({ cause })));
++var completePartialPrograms = () => Effect17.gen(function* () {
++  const { config } = yield* TxConfig;
+   const sortedInputs = sortUTxOs(config.collectedInputs, "Canonical");
+   const indicesMap = /* @__PURE__ */ new Map();
+   sortedInputs.forEach((value, index) => {
+@@ -1465,8 +1515,8 @@ var completePartialPrograms = (config) => Effect16.gen(function* () {
+       newPrograms.push(program);
+     } else {
+       const inputs = yield* pipe9(
+-        Effect16.fromNullable(redeemerBuilder.inputs),
+-        Effect16.orElseFail(
++        Effect17.fromNullable(redeemerBuilder.inputs),
++        Effect17.orElseFail(
+           () => completeTxError(
+             `RedeemerBuilder: Inputs for redeemer builder not founds: ${stringify(redeemerBuilder)}`
+           )
+@@ -1474,20 +1524,20 @@ var completePartialPrograms = (config) => Effect16.gen(function* () {
+       );
+       for (const input of inputs) {
+         const index = yield* pipe9(
+-          Effect16.fromNullable(
++          Effect17.fromNullable(
+             indicesMap.get(input.txHash + input.outputIndex)
+           ),
+-          Effect16.orElseFail(
++          Effect17.orElseFail(
+             () => completeTxError(`Index not found for input: ${input}`)
+           )
+         );
+         const redeemer = redeemerBuilder.makeRedeemer(index);
+-        const program = collectFromUTxO(config, [input], false)(redeemer);
++        const program = collectFromUTxO([input], false)(redeemer);
+         newPrograms.push(program);
+       }
+     }
+   }
+-  yield* Effect16.all(newPrograms);
++  yield* Effect17.all(newPrograms);
+ });
+ var applyUPLCEval = (uplcEval, txbuilder) => {
+   for (const bytes of uplcEval) {
+@@ -1561,7 +1611,8 @@ var setRedeemerstoZero = (tx) => {
+   }
+   return tx;
+ };
+-var applyCollateral = (config, setCollateral, collateralInputs, changeAddress) => {
++var applyCollateral = (setCollateral, collateralInputs, changeAddress) => Effect17.gen(function* () {
++  const { config } = yield* TxConfig;
+   for (const utxo of collateralInputs) {
+     const collateralInput = CML.SingleInputBuilder.from_transaction_unspent_output(
+       utxoToCore3(utxo)
+@@ -1578,15 +1629,15 @@ var applyCollateral = (config, setCollateral, collateralInputs, changeAddress) =
+   config.txBuilder.set_collateral_return(
+     collateralOutputBuilder.next().with_value(assetsToValue2(returnassets)).build().output()
+   );
+-};
+-var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => Effect16.gen(function* () {
++});
++var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => Effect17.gen(function* () {
+   const collateralLovelace = { lovelace: setCollateral };
+   const error = completeTxError(
+     `Your wallet does not have enough funds to cover the required ${setCollateral} Lovelace collateral. Or it contains UTxOs with reference scripts; which
+       are excluded from collateral selection.`
+   );
+   const { selected } = yield* recursive(
+-    sortUTxOs(inputs),
++    sortUTxOs(inputs, "Collateral"),
+     collateralLovelace,
+     coinsPerUtxoByte,
+     void 0,
+@@ -1599,7 +1650,7 @@ var findCollateral = (coinsPerUtxoByte, setCollateral, inputs) => Effect16.gen(f
+     );
+   return selected;
+ });
+-var doCoinSelection = (config, availableInputs, script_calculation, includeLeftoverLovelaceAsFee) => Effect16.gen(function* () {
++var doCoinSelection = (config, availableInputs, script_calculation, includeLeftoverLovelaceAsFee) => Effect17.gen(function* () {
+   const estimatedFee = {
+     lovelace: yield* estimateFee(config, script_calculation)
+   };
+@@ -1630,7 +1681,7 @@ var doCoinSelection = (config, availableInputs, script_calculation, includeLefto
+     includeLeftoverLovelaceAsFee
+   );
+ });
+-var estimateFee = (config, script_calculation) => Effect16.gen(function* () {
++var estimateFee = (config, script_calculation) => Effect17.gen(function* () {
+   const minFee = config.txBuilder.min_fee(script_calculation);
+   const refScriptFee = yield* calculateMinRefScriptFee(config);
+   let estimatedFee = minFee + refScriptFee;
+@@ -1641,10 +1692,16 @@ var estimateFee = (config, script_calculation) => Effect16.gen(function* () {
+   }
+   return estimatedFee;
+ });
+-var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => Effect16.gen(function* () {
++var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => Effect17.gen(function* () {
+   const txEvaluation = setRedeemerstoZero(txRedeemerBuilder.draft_tx());
+-  const txUtxos = [...config.collectedInputs, ...config.readInputs];
+-  const uplc_eval = yield* Effect16.tryPromise({
++  const txUtxos = [...config.collectedInputs, ...config.readInputs].map(
++    ({ datumHash, datum, ...rest }) => ({
++      ...rest,
++      datumHash,
++      datum: datumHash ? void 0 : datum
++    })
++  );
++  const uplc_eval = yield* Effect17.tryPromise({
+     try: () => config.lucidConfig.provider.evaluateTx(
+       txEvaluation.to_cbor_hex(),
+       txUtxos
+@@ -1653,17 +1710,21 @@ var evalTransactionProvider = (config, txRedeemerBuilder, walletInputs) => Effec
+   });
+   return uplc_eval;
+ });
+-var evalTransaction = (config, txRedeemerBuilder, walletInputs) => Effect16.gen(function* () {
++var evalTransaction = (config, txRedeemerBuilder, walletInputs) => Effect17.gen(function* () {
+   const txEvaluation = setRedeemerstoZero(txRedeemerBuilder.draft_tx());
+   const txUtxos = [
+     ...walletInputs,
+     ...config.collectedInputs,
+     ...config.readInputs
+-  ];
++  ].map(({ datumHash, datum, ...rest }) => ({
++    ...rest,
++    datumHash,
++    datum: datumHash ? void 0 : datum
++  }));
+   const ins = txUtxos.map((utxo) => utxoToTransactionInput(utxo));
+   const outs = txUtxos.map((utxo) => utxoToTransactionOutput(utxo));
+   const slotConfig = SLOT_CONFIG_NETWORK[config.lucidConfig.network];
+-  const uplc_eval = yield* Effect16.try({
++  const uplc_eval = yield* Effect17.try({
+     try: () => UPLC.eval_phase_two_raw(
+       txEvaluation.to_cbor_bytes(),
+       ins.map((value) => value.to_cbor_bytes()),
+@@ -1676,7 +1737,7 @@ var evalTransaction = (config, txRedeemerBuilder, walletInputs) => Effect16.gen(
+       slotConfig.slotLength
+     ),
+     catch: (error) => completeTxError(
+-      JSON.stringify(error).replace(/\\n\s*/g, " ").trim()
++      `${isError(error) ? error : JSON.stringify(error).replace(/\\n\s*/g, " ").trim()}`
+     )
+   });
+   return uplc_eval;
+@@ -1690,19 +1751,19 @@ var calculateMinLovelace = (coinsPerUtxoByte, multiAssets, changeAddress) => {
+     coinsPerUtxoByte
+   ).build().output().amount().coin();
+ };
+-var calculateMinRefScriptFee = (config) => Effect16.gen(function* () {
++var calculateMinRefScriptFee = (config) => Effect17.gen(function* () {
+   let fee = 0n;
+   let totalScriptSize = 0;
+-  config.readInputs.forEach((utxo) => {
++  for (const utxo of config.readInputs) {
+     if (utxo.scriptRef) {
+       totalScriptSize = totalScriptSize + utxo.scriptRef.script.length / 2;
+     }
+-  });
+-  config.collectedInputs.forEach((utxo) => {
++  }
++  for (const utxo of config.collectedInputs) {
+     if (utxo.scriptRef) {
+       totalScriptSize = totalScriptSize + utxo.scriptRef.script.length / 2;
+     }
+-  });
++  }
+   if (totalScriptSize === 0) return fee;
+   const fees = [15, 18, 21.6, 25.92, 31.1, 37.32, 44.79, 53.75];
+   let counter = 0;
+@@ -1743,7 +1804,7 @@ var calculateExtraLovelace = (leftoverAssets, coinsPerUtxoByte) => {
+     return currentLovelace >= minLovelace ? Option.none() : Option.some({ lovelace: minLovelace - currentLovelace });
+   });
+ };
+-var recursive = (inputs, requiredAssets, coinsPerUtxoByte, externalAssets = {}, includeLeftoverLovelaceAsFee, error) => Effect16.gen(function* () {
++var recursive = (inputs, requiredAssets, coinsPerUtxoByte, externalAssets = {}, includeLeftoverLovelaceAsFee, error) => Effect17.gen(function* () {
+   let selected = [];
+   error ??= completeTxError(
+     `Your wallet does not have enough funds to cover the required assets: ${stringify(requiredAssets)}
+@@ -1794,7 +1855,7 @@ var recursive = (inputs, requiredAssets, coinsPerUtxoByte, externalAssets = {},
+ });
+ 
+ // src/tx-builder/TxBuilder.ts
+-import { Effect as Effect17 } from "effect";
++import { Effect as Effect18, Layer, pipe as pipe10 } from "effect";
+ import { addAssets as addAssets2 } from "@lucid-evolution/utils";
+ function makeTxBuilder(lucidConfig) {
+   const config = {
+@@ -1812,6 +1873,7 @@ function makeTxBuilder(lucidConfig) {
+     partialPrograms: /* @__PURE__ */ new Map(),
+     minFee: void 0
+   };
++  const configLayer = Layer.succeed(TxConfig, { config });
+   const txBuilder = {
+     readFrom: (utxos) => {
+       utxos.map((utxo) => {
+@@ -1820,24 +1882,23 @@ function makeTxBuilder(lucidConfig) {
+           config.scripts.set(scriptKeyValue.key, scriptKeyValue.value);
+         }
+       });
+-      const program = readFrom(config, utxos);
++      const program = readFrom(utxos);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     collectFrom: (utxos, redeemer) => {
+-      const program = typeof redeemer === "object" ? collectFromUTxOPartial(config, utxos, redeemer) : collectFromUTxO(config, utxos)(redeemer);
++      const program = typeof redeemer === "object" ? collectFromUTxOPartial(utxos, redeemer) : collectFromUTxO(utxos)(redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     pay: {
+       ToAddress: (address, assets) => {
+-        const program = payToAddress(config, address, assets);
++        const program = payToAddress(address, assets);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       ToAddressWithData: (address, outputDatum, assets, scriptRef) => {
+-        const program = payToAddressWithData(
+-          config,
++        const program = ToAddressWithData(
+           address,
+           outputDatum,
+           assets,
+@@ -1847,41 +1908,34 @@ function makeTxBuilder(lucidConfig) {
+         return txBuilder;
+       },
+       ToContract: (address, outputDatum, assets, scriptRef) => {
+-        const program = payToContract(
+-          config,
+-          address,
+-          outputDatum,
+-          assets,
+-          scriptRef
+-        );
++        const program = ToContract(address, outputDatum, assets, scriptRef);
+         config.programs.push(program);
+         return txBuilder;
+       }
+     },
+     addSigner: (address) => {
+-      const program = addSigner(config, address);
++      const program = addSigner(address);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     addSignerKey: (keyHash) => {
+-      const program = addSignerKey(config, keyHash);
++      const program = addSignerKey(keyHash);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     registerStake: (rewardAddress) => {
+-      const program = registerStake(config, rewardAddress);
++      const program = registerStake(rewardAddress);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     register: {
+       Stake: (rewardAddress) => {
+-        const program = registerStake(config, rewardAddress);
++        const program = registerStake(rewardAddress);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       DRep: (rewardAddress, anchor, redeemer) => {
+         const program = registerDRep(
+-          config,
+           rewardAddress,
+           anchor,
+           redeemer
+@@ -1891,66 +1945,56 @@ function makeTxBuilder(lucidConfig) {
+       }
+     },
+     deRegisterStake: (rewardAddress, redeemer) => {
+-      const program = deRegisterStake(config, rewardAddress, redeemer);
++      const program = deRegisterStake(rewardAddress, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     deregister: {
+       Stake: (rewardAddress, redeemer) => {
+-        const program = deRegisterStake(config, rewardAddress, redeemer);
++        const program = deRegisterStake(rewardAddress, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       DRep: (rewardAddress, redeemer) => {
+-        const program = deregisterDRep(
+-          config,
+-          rewardAddress,
+-          redeemer
+-        );
++        const program = deregisterDRep(rewardAddress, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       }
+     },
+     withdraw: (rewardAddress, amount, redeemer) => {
+-      const partialProgram = withdraw(config, rewardAddress, amount);
++      const partialProgram = withdraw(rewardAddress, amount);
+       handleRedeemerBuilder(config, partialProgram, redeemer);
+       return txBuilder;
+     },
+     mintAssets: (assets, redeemer) => {
+       config.mintedAssets = addAssets2(config.mintedAssets, assets);
+-      const partialProgram = mintAssets(config, assets);
++      const partialProgram = mintAssets(assets);
+       handleRedeemerBuilder(config, partialProgram, redeemer);
+       return txBuilder;
+     },
+     validFrom: (unixTime) => {
+-      const program = validFrom(config, unixTime);
++      const program = validFrom(unixTime);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     validTo: (unixTime) => {
+-      const program = validTo(config, unixTime);
++      const program = validTo(unixTime);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     delegateTo: (rewardAddress, poolId, redeemer) => {
+-      const program = delegateTo(config, rewardAddress, poolId, redeemer);
++      const program = delegateTo(rewardAddress, poolId, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     delegate: {
+       ToPool: (rewardAddress, poolId, redeemer) => {
+-        const program = delegateTo(
+-          config,
+-          rewardAddress,
+-          poolId,
+-          redeemer
+-        );
++        const program = delegateTo(rewardAddress, poolId, redeemer);
+         config.programs.push(program);
+         return txBuilder;
+       },
+       VoteToDRep: (rewardAddress, drep, redeemer) => {
+         const program = delegateVoteToDRep(
+-          config,
+           rewardAddress,
+           drep,
+           redeemer
+@@ -1960,7 +2004,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       VoteToPoolAndDRep: (rewardAddress, poolId, drep, redeemer) => {
+         const program = delegateVoteToPoolAndDRep(
+-          config,
+           rewardAddress,
+           poolId,
+           drep,
+@@ -1973,7 +2016,6 @@ function makeTxBuilder(lucidConfig) {
+     registerAndDelegate: {
+       ToPool: (rewardAddress, poolId, redeemer) => {
+         const program = registerAndDelegateToPool(
+-          config,
+           rewardAddress,
+           poolId,
+           redeemer
+@@ -1983,7 +2025,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       ToDRep: (rewardAddress, drep, redeemer) => {
+         const program = registerAndDelegateToDRep(
+-          config,
+           rewardAddress,
+           drep,
+           redeemer
+@@ -1993,7 +2034,6 @@ function makeTxBuilder(lucidConfig) {
+       },
+       ToPoolAndDRep: (rewardAddress, poolId, drep, redeemer) => {
+         const program = registerAndDelegateToPoolAndDRep(
+-          config,
+           rewardAddress,
+           poolId,
+           drep,
+@@ -2004,18 +2044,12 @@ function makeTxBuilder(lucidConfig) {
+       }
+     },
+     updateDRep: (rewardAddress, anchor, redeemer) => {
+-      const program = updateDRep(
+-        config,
+-        rewardAddress,
+-        anchor,
+-        redeemer
+-      );
++      const program = updateDRep(rewardAddress, anchor, redeemer);
+       config.programs.push(program);
+       return txBuilder;
+     },
+     authCommitteeHot: (coldAddress, hotAddress, redeemer) => {
+       const program = authCommitteeHot(
+-        config,
+         coldAddress,
+         hotAddress,
+         redeemer
+@@ -2025,7 +2059,6 @@ function makeTxBuilder(lucidConfig) {
+     },
+     resignCommitteeHot: (coldAddress, anchor, redeemer) => {
+       const program = resignCommitteeHot(
+-        config,
+         coldAddress,
+         anchor,
+         redeemer
+@@ -2077,11 +2110,9 @@ function makeTxBuilder(lucidConfig) {
+     },
+     compose: (tx) => {
+       if (tx) {
+-        const program = Effect17.gen(function* () {
+-          const config2 = yield* Effect17.promise(() => tx.config());
+-          yield* Effect17.all(config2.programs, { concurrency: "unbounded" });
+-        });
+-        config.programs.push(program);
++        const rawConfig = tx.rawConfig();
++        config.programs = [...config.programs, ...tx.getPrograms()];
++        config.scripts = new Map([...config.scripts, ...rawConfig.scripts]);
+       }
+       return txBuilder;
+     },
+@@ -2090,26 +2121,42 @@ function makeTxBuilder(lucidConfig) {
+       return txBuilder;
+     },
+     complete: (options) => makeReturn(
+-      complete(config, options).pipe(
+-        Effect17.map((result) => result[2])
++      pipe10(
++        complete(options),
++        Effect18.provide(configLayer),
++        Effect18.map((result) => result[2])
+       )
+     ).unsafeRun(),
+-    completeProgram: (options) => complete(config, options).pipe(
+-      Effect17.map((result) => result[2])
++    completeProgram: (options) => pipe10(
++      complete(options),
++      Effect18.provide(configLayer),
++      Effect18.map((result) => result[2])
+     ),
+     completeSafe: (options) => makeReturn(
+-      complete(config, options).pipe(
+-        Effect17.map((result) => result[2])
++      pipe10(
++        complete(options),
++        Effect18.provide(configLayer),
++        Effect18.map((result) => result[2])
+       )
+     ).safeRun(),
+-    chainProgram: (options) => complete(config, options),
+-    chain: (options) => makeReturn(complete(config, options)).unsafeRun(),
+-    chainSafe: (options) => makeReturn(complete(config, options)).safeRun(),
+-    config: () => Effect17.gen(function* () {
+-      yield* Effect17.all(config.programs);
+-      return config;
+-    }).pipe(Effect17.runPromise),
+-    lucidConfig: () => config.lucidConfig
++    chainProgram: (options) => pipe10(complete(options), Effect18.provide(configLayer)),
++    chain: (options) => makeReturn(
++      pipe10(complete(options), Effect18.provide(configLayer))
++    ).unsafeRun(),
++    chainSafe: (options) => makeReturn(
++      pipe10(complete(options), Effect18.provide(configLayer))
++    ).safeRun(),
++    rawConfig: () => config,
++    config: () => pipe10(
++      Effect18.gen(function* () {
++        yield* Effect18.all(config.programs);
++        return config;
++      }),
++      Effect18.provide(configLayer),
++      Effect18.runPromise
++    ),
++    lucidConfig: () => config.lucidConfig,
++    getPrograms: () => config.programs
+   };
+   return txBuilder;
+ }
+@@ -2144,24 +2191,37 @@ import {
+   makeWalletFromPrivateKey,
+   makeWalletFromSeed
+ } from "@lucid-evolution/wallet";
++import { Effect as Effect19, pipe as pipe11 } from "effect";
+ var Lucid = async (provider, network, options = {}) => {
+-  const protocolParameters = options.presetProtocolParameters || await provider.getProtocolParameters();
+-  const costModels = createCostModels(protocolParameters.costModels);
++  const protocolParameters = options.presetProtocolParameters || await provider?.getProtocolParameters();
++  const costModels = protocolParameters ? createCostModels(protocolParameters.costModels) : void 0;
+   const config = {
+     provider,
+     network,
+     wallet: void 0,
+     costModels,
+-    txbuilderconfig: makeTxConfig(protocolParameters, costModels),
++    txbuilderconfig: protocolParameters && costModels ? makeTxConfig(protocolParameters, costModels) : void 0,
+     protocolParameters
+   };
+-  if ("slot" in config.provider) {
++  if (config.provider && "slot" in config.provider) {
+     const emulator = config.provider;
+-    SLOT_CONFIG_NETWORK2[network] = {
+-      zeroTime: emulator.now(),
+-      zeroSlot: 0,
+-      slotLength: 1e3
+-    };
++    Effect19.gen(function* () {
++      const custom = yield* pipe11(
++        validateNotNullableNetwork(network)
++        // Effect.filterOrFail(
++        //   (network) => network === "Custom",
++        //   () =>
++        //     new UnauthorizedNetwork({
++        //       message: `Expected Custom, received ${String(network)}`,
++        //     }),
++        // ),
++      );
++      SLOT_CONFIG_NETWORK2[custom] = {
++        zeroTime: emulator.now(),
++        zeroSlot: 0,
++        slotLength: 1e3
++      };
++    }).pipe(Effect19.runSync);
+   }
+   return {
+     config: () => config,
+@@ -2175,52 +2235,141 @@ var Lucid = async (provider, network, options = {}) => {
+       config.txbuilderconfig = makeTxConfig(protocolParam, costModels2);
+       config.protocolParameters = protocolParam;
+     },
+-    newTx: () => makeTxBuilder(config),
++    newTx: () => Effect19.gen(function* () {
++      const provider2 = yield* Effect19.fromNullable(config.provider);
++      const network2 = yield* Effect19.fromNullable(config.network);
++      const costModels2 = yield* validateNotNullable(
++        config.costModels,
++        "CostModels are not set in Lucid instance"
++      );
++      const txbuilderconfig = yield* validateNotNullable(
++        config.txbuilderconfig,
++        "txbuilderconfig is not set in Lucid instance"
++      );
++      const protocolParameters2 = yield* validateNotNullable(
++        config.protocolParameters,
++        "protocolParameters are not set in Lucid instance"
++      );
++      return makeTxBuilder({
++        provider: provider2,
++        network: network2,
++        wallet: config.wallet,
++        costModels: costModels2,
++        txbuilderconfig,
++        protocolParameters: protocolParameters2
++      });
++    }).pipe(Effect19.runSync),
+     fromTx: (tx) => makeTxSignBuilder(
+-      config,
++      config.wallet,
+       CML.Transaction.from_cbor_hex(tx)
+     ),
+     selectWallet: {
+-      fromSeed: (seed, options2) => {
++      fromSeed: (seed, options2) => Effect19.gen(function* () {
+         config.wallet = makeWalletFromSeed(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           seed,
+           options2
+         );
+-      },
+-      fromPrivateKey: (privateKey) => {
++      }).pipe(Effect19.runSync),
++      fromPrivateKey: (privateKey) => Effect19.gen(function* () {
+         config.wallet = makeWalletFromPrivateKey(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           privateKey
+         );
+-      },
+-      fromAPI: (walletAPI) => {
+-        config.wallet = makeWalletFromAPI(config.provider, walletAPI);
+-      },
+-      fromAddress: (address, utxos) => {
++      }).pipe(Effect19.runSync),
++      fromAPI: (walletAPI) => Effect19.gen(function* () {
++        config.wallet = makeWalletFromAPI(
++          yield* validateNotNullableProvider(config.provider),
++          walletAPI
++        );
++      }).pipe(Effect19.runSync),
++      fromAddress: (address, utxos) => Effect19.gen(function* () {
+         config.wallet = makeWalletFromAddress(
+-          config.provider,
+-          network,
++          yield* validateNotNullableProvider(config.provider),
++          yield* validateNotNullableNetwork(network),
+           address,
+           utxos
+         );
+-      }
++      }).pipe(Effect19.runSync)
+     },
+-    currentSlot: () => {
+-      return unixTimeToSlot2(config.network, Date.now());
+-    },
+-    utxosAt: (addressOrCredential) => config.provider.getUtxos(addressOrCredential),
+-    utxosAtWithUnit: (addressOrCredential, unit) => config.provider.getUtxosWithUnit(addressOrCredential, unit),
+-    utxoByUnit: (unit) => config.provider.getUtxoByUnit(unit),
+-    utxosByOutRef: (outRefs) => config.provider.getUtxosByOutRef(outRefs),
+-    delegationAt: config.provider.getDelegation,
+-    awaitTx: (txHash, checkInterval) => config.provider.awaitTx(txHash, checkInterval),
+-    datumOf: (utxo, type) => datumOf(config.provider, utxo, type),
+-    metadataOf: (unit) => metadataOf(config.provider, unit)
++    currentSlot: () => pipe11(
++      validateNotNullableNetwork(config.network),
++      Effect19.map((network2) => unixTimeToSlot2(network2, Date.now())),
++      Effect19.runSync
++    ),
++    unixTimeToSlot: (unixTime) => pipe11(
++      validateNotNullableNetwork(config.network),
++      Effect19.map((network2) => unixTimeToSlot2(network2, unixTime)),
++      Effect19.runSync
++    ),
++    utxosAt: (addressOrCredential) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => provider2.getUtxos(addressOrCredential))
++      ),
++      Effect19.runPromise
++    ),
++    utxosAtWithUnit: (addressOrCredential, unit) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(
++          () => provider2.getUtxosWithUnit(addressOrCredential, unit)
++        )
++      ),
++      Effect19.runPromise
++    ),
++    utxoByUnit: (unit) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => provider2.getUtxoByUnit(unit))
++      ),
++      Effect19.runPromise
++    ),
++    utxosByOutRef: (outRefs) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => provider2.getUtxosByOutRef(outRefs))
++      ),
++      Effect19.runPromise
++    ),
++    delegationAt: (rewardAddress) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => provider2.getDelegation(rewardAddress))
++      ),
++      Effect19.runPromise
++    ),
++    awaitTx: (txHash, checkInterval) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => provider2.awaitTx(txHash, checkInterval))
++      ),
++      Effect19.runPromise
++    ),
++    datumOf: (utxo, type) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => datumOf(provider2, utxo, type))
++      ),
++      Effect19.runPromise
++    ),
++    metadataOf: (unit) => pipe11(
++      validateNotNullableProvider(config.provider),
++      Effect19.flatMap(
++        (provider2) => Effect19.promise(() => metadataOf(provider2, unit))
++      ),
++      Effect19.runPromise
++    )
+   };
+ };
++var validateNotNullable = (value, message) => pipe11(
++  Effect19.fromNullable(value),
++  Effect19.orElseFail(() => new NullableError({ message }))
++);
++var validateNotNullableNetwork = (network) => validateNotNullable(network, "Network is not set in Lucid instance");
++var validateNotNullableProvider = (provider) => validateNotNullable(provider, "Provider is not set in Lucid instance");
+ 
+ // src/index.ts
+ export * from "@lucid-evolution/core-types";
+@@ -2234,10 +2383,12 @@ export {
+   CML,
+   ERROR_MESSAGE,
+   Lucid,
++  NullableError,
+   RunTimeError,
+   TxBuilderError,
+   TxSignerError,
+   TxSubmitError,
++  UnauthorizedNetwork,
+   makeReturn,
+   makeSubmit,
+   makeTxBuilder,
